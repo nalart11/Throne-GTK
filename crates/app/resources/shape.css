@@ -1,0 +1,52 @@
+/* Форма кнопок.
+ *
+ * Отдельный файл, потому что грузится он с приоритетом выше пользовательского:
+ * тема рабочего стола вправе решать почти всё, но не форму кнопок в этом окне.
+ * Темы вроде adw-gtk3 задают `.text-button { border-radius: 999px }`, и тогда
+ * переключатель режима и кнопки в шапке расплываются в капсулы, а сетка окна
+ * держится на прямоугольниках.
+ */
+
+button,
+button.text-button,
+button.toggle,
+button.image-button,
+entry,
+spinbutton,
+.card,
+.boxed-list,
+row,
+popover > contents,
+toast,
+.osd,
+scrolledwindow.card,
+menubutton > button {
+  border-radius: 6px;
+}
+
+/* Круглые по замыслу — закрытие окна, кнопки-иконки в шапке — такими и
+   остаются: их форма несёт смысл, а не украшает. */
+button.circular,
+button.circular.image-button {
+  border-radius: 999px;
+}
+
+/* Связанная пара «Прокси | VPN»: скруглены только внешние углы, иначе группа
+   распадается на две отдельные кнопки. */
+.linked > button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.linked > button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.linked > button:not(:first-child):not(:last-child) {
+  border-radius: 0;
+}
+
+/* Кнопка подключения остаётся капсулой: она единственный по-настоящему
+   выделенный элемент экрана, и форма — часть этого выделения. */
+button.connect {
+  border-radius: 999px;
+}

@@ -1,0 +1,28 @@
+[package]
+name = "throne-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "throne-gtk"
+path = "src/main.rs"
+
+[dev-dependencies]
+# Только для примера selftest: проверка соединения через поднятый прокси.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "socks"] }
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+throne-ipc = { path = "../ipc" }
+throne-config = { path = "../config" }
+throne-store = { path = "../store" }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+async-channel = "2"
+ksni = "0.3.6"

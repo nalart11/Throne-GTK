@@ -1,0 +1,17 @@
+[package]
+name = "throne-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+percent-encoding = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+serde_yaml_ng = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "charset", "http2"] }

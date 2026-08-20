@@ -1,0 +1,15 @@
+[package]
+name = "throne-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time", "process"] }
+bytes = "1"
+
+[build-dependencies]
+prost-build = "0.13"

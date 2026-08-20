@@ -1,0 +1,161 @@
+/* Оформление Throne GTK.
+ *
+ * Цвета берутся из темы рабочего стола, своих значений здесь нет: выделенное
+ * в окне — состояние канала, активный сервер, счётчики — совпадает по цвету с
+ * тем, что тема считает акцентом, то есть с выбранным тумблером режима.
+ * Данные — задержки, скорости, порты — всегда моноширинные с табличными
+ * цифрами, чтобы колонки не дрожали при обновлении раз в секунду.
+ */
+
+/* Второстепенный текст — тот же цвет, что у обычного, но приглушённый. */
+@define-color quiet alpha(@window_fg_color, 0.55);
+
+.numeric {
+  font-family: "JetBrains Mono", "Adwaita Mono", monospace;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── статусная панель ──────────────────────────────────────────────── */
+
+.channel {
+  padding: 18px 20px 12px 20px;
+}
+
+/* Состояние набрано мелко и вразрядку — это подпись к крупному имени
+   сервера, а не заголовок сам по себе. */
+.channel-state {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: @quiet;
+}
+
+.channel-state.live    { color: @accent_color; }
+.channel-state.working { color: @accent_color; }
+.channel-state.failed  { color: @error_color; }
+
+.channel-name {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.channel-name.empty {
+  color: @quiet;
+  font-weight: 500;
+}
+
+.channel-rate {
+  font-size: 0.92rem;
+  color: @quiet;
+}
+
+.channel-rate .value { color: @accent_color; }
+
+/* Кнопка подключения — капсула с разреженным шрифтом: единственный
+   по-настоящему выделенный элемент экрана. Цвет — акцент темы. */
+.connect {
+  border-radius: 999px;
+  padding: 8px 22px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  min-width: 128px;
+  background: @accent_bg_color;
+  background-image: none;
+  color: @accent_fg_color;
+  border: none;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.connect:hover  { background: shade(@accent_bg_color, 1.15); background-image: none; }
+.connect:active { background: shade(@accent_bg_color, 0.9); background-image: none; }
+
+.connect:disabled {
+  background: alpha(@accent_bg_color, 0.35);
+  color: alpha(@accent_fg_color, 0.7);
+}
+
+/* Подключено — кнопка перестаёт звать нажать: контур вместо заливки. */
+.connect.live {
+  background: alpha(@accent_bg_color, 0.16);
+  background-image: none;
+  color: @accent_color;
+  box-shadow: inset 0 0 0 1px alpha(@accent_color, 0.45);
+}
+
+.connect.live:hover { background: alpha(@accent_bg_color, 0.26); }
+
+/* Линия трафика рисуется в cairo цветом, который получает отсюда. */
+.sparkline { color: @accent_color; }
+
+/* ── список серверов ───────────────────────────────────────────────── */
+
+.server-row {
+  padding: 9px 12px;
+  border-radius: 6px;
+}
+
+.server-row .name { font-weight: 600; }
+
+.server-row .meta {
+  font-size: 0.82rem;
+  color: @quiet;
+}
+
+/* Активный сервер отмечен засечкой на границе строки, а не заливкой:
+   выделение должно читаться и не перекрикивать соседей. */
+.server-row.active {
+  border-left: 3px solid @accent_bg_color;
+  padding-left: 9px;
+  background: alpha(@accent_bg_color, 0.07);
+}
+
+/* Результат замера — тем же акцентом, что и трафик на графике. */
+.server-row .speed { color: @accent_color; }
+
+.latency {
+  font-size: 0.86rem;
+  color: @quiet;
+  min-width: 58px;
+}
+
+.latency.fast   { color: @success_color; }
+.latency.medium { color: @warning_color; }
+.latency.slow   { color: @error_color; }
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: alpha(@accent_bg_color, 0.16);
+  color: @accent_color;
+}
+
+/* ── журнал и соединения ───────────────────────────────────────────── */
+
+.log-view {
+  font-family: "JetBrains Mono", "Adwaita Mono", monospace;
+  font-size: 0.84rem;
+  padding: 10px 12px;
+  background: transparent;
+}
+
+.section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: @quiet;
+}
+
+.empty-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.empty-body { color: @quiet; }

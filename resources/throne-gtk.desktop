@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Throne GTK
+GenericName=Прокси-клиент
+GenericName[en]=Proxy client
+Comment=Клиент прокси на ядре sing-box и Xray
+Comment[en]=Proxy client powered by sing-box and Xray
+Exec=@EXEC@
+Icon=dev.nalart.ThroneGtk
+Terminal=false
+Categories=Network;
+Keywords=proxy;vpn;прокси;sing-box;xray;vless;
+StartupNotify=true
+StartupWMClass=dev.nalart.ThroneGtk
