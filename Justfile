@@ -2,6 +2,11 @@
 
 core_tags := "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,with_purego,with_naive_outbound,badlinkname,tfogo_checklinkname0"
 
+# sing-box и sing-trusttunnel используют //go:linkname к внутренностям
+# golang.org/x/net/http2; в Go 1.27 нужный символ инлайнится и линковка падает.
+# Собираем ядро тулчейном 1.26, пока форк Throneproj/sing-box не подтянул фикс.
+export GOTOOLCHAIN := "go1.26.0"
+
 # Собрать всё: ядро и интерфейс
 build: core app
 
@@ -9,7 +14,7 @@ build: core app
 core:
     cd core/gen && protoc -I . --go_out=. --go-grpc_out=. libcore.proto
     cd core && CGO_ENABLED=1 go build -o ../build/throne-gtk-core -trimpath \
-        -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$(cd core && go list -m -f '{{{{.Version}}}}' github.com/sagernet/sing-box)' -checklinkname=0" \
+        -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$(go list -m -f '{{{{.Version}}' github.com/sagernet/sing-box)' -checklinkname=0" \
         -tags "{{core_tags}}"
     ./scripts/fetch_cronet.sh
 
