@@ -49,7 +49,7 @@ sing-box и sing-trusttunnel к внутренностям `golang.org/x/net/htt
 
 ```sh
 just build          # ядро и интерфейс
-just run            # отладочный запуск
+just run-app            # отладочный запуск
 just test           # тесты
 ```
 
