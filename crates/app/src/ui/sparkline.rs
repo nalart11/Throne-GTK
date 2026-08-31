@@ -1,8 +1,8 @@
-//! Линия канала — живой график трафика под статусом.
+//! Channel line: a live traffic graph beneath the status.
 //!
-//! Это главный визуальный элемент окна: по нему видно, что соединение не
-//! просто «подключено», а действительно несёт трафик. В покое линия
-//! выпрямляется в тонкую нить у основания.
+//! This is the window’s main visual element: it shows that the connection is not
+//! merely “connected” but actually carrying traffic. At rest, the line becomes a
+//! thin thread along the baseline.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gtk::cairo;
 use gtk::prelude::*;
 
-/// Сколько отсчётов хранит график. При опросе раз в секунду это две минуты.
+/// Number of samples stored by the graph. At one poll per second, this is two minutes.
 const HISTORY: usize = 120;
 
 #[derive(Default)]
@@ -19,7 +19,7 @@ struct Samples {
     up: Vec<f64>,
 }
 
-/// График с историей отсчётов.
+/// Graph with sample history.
 #[derive(Clone)]
 pub struct Sparkline {
     pub widget: gtk::DrawingArea,
@@ -32,8 +32,8 @@ impl Sparkline {
             .height_request(56)
             .margin_top(6)
             .hexpand(true)
-            // Цвет линии берётся из стиля виджета, а не задаётся числами:
-            // класс отдаёт его теме, как и всему остальному в окне.
+            // The line color comes from the widget style rather than hard-coded
+            // values: the class delegates it to the theme like the rest of the window.
             .css_classes(["sparkline"])
             .build();
         let samples = Rc::new(RefCell::new(Samples::default()));
@@ -46,9 +46,8 @@ impl Sparkline {
             }
         });
 
-        // Цвета графика рисуются вручную, поэтому смену светлой и тёмной схемы
-        // виджет обязан отслеживать сам: остальной интерфейс перекрашивает
-        // libadwaita, а холст — нет.
+        // Graph colors are drawn manually, so the widget must track light and dark
+        // scheme changes itself: libadwaita repaints the rest, but not the canvas.
         adw::StyleManager::default().connect_dark_notify({
             let widget = widget.clone();
             move |_| widget.queue_draw()
@@ -57,7 +56,7 @@ impl Sparkline {
         Self { widget, samples }
     }
 
-    /// Добавляет отсчёт: байты за прошедшую секунду.
+    /// Adds a sample: bytes transferred during the last second.
     pub fn push(&self, down: i64, up: i64) {
         {
             let mut s = self.samples.borrow_mut();
@@ -71,7 +70,7 @@ impl Sparkline {
         self.widget.queue_draw();
     }
 
-    /// Сбрасывает историю — например, при отключении.
+    /// Clears the history, for example on disconnect.
     pub fn clear(&self) {
         *self.samples.borrow_mut() = Samples::default();
         self.widget.queue_draw();
@@ -79,7 +78,7 @@ impl Sparkline {
 }
 
 fn draw(area: &gtk::DrawingArea, ctx: &cairo::Context, width: f64, height: f64, samples: &Samples) {
-    // Цвет — тот, что тема дала виджету через CSS.
+    // The color is the one the theme provided to the widget through CSS.
     let color = area.color();
     let (r, g, b) = (
         color.red() as f64,
@@ -94,10 +93,10 @@ fn draw(area: &gtk::DrawingArea, ctx: &cairo::Context, width: f64, height: f64, 
         .chain(samples.up.iter())
         .fold(0.0_f64, |a, b| a.max(*b));
 
-    // Ниже этого потока график — прямая нить: иначе фоновый шум в пару
-    // килобайт рисовался бы во всю высоту и выглядел как нагрузка. Покой от
-    // нагрузки отличается теперь не цветом, а насыщенностью: цвет в окне
-    // ровно один, и это акцент темы.
+    // Below this throughput the graph is a straight thread; otherwise background
+    // noise of a few kilobytes would fill the height and look like load. Idle is
+    // now distinguished from load by saturation, not color: the window has one
+    // color, the theme accent.
     let quiet = peak < 16_384.0;
     let scale = if quiet { 1.0 } else { peak };
     let fade = if quiet { 0.45 } else { 1.0 };
@@ -113,9 +112,9 @@ fn draw(area: &gtk::DrawingArea, ctx: &cairo::Context, width: f64, height: f64, 
     }
 
     let step = width / (HISTORY - 1) as f64;
-    // Линия пишется слева направо и доходит до правого края за две минуты,
-    // после чего окно начинает скользить. Прижимать короткую историю вправо
-    // нельзя: первые секунды выглядели бы обрубком у самого края.
+    // The line is drawn left to right and reaches the right edge in two minutes,
+    // after which the window starts sliding. Short history cannot be right-aligned:
+    // the first seconds would look cut off at the edge.
     let offset = 0.0;
 
     let point = |index: usize, value: f64| -> (f64, f64) {
@@ -123,15 +122,15 @@ fn draw(area: &gtk::DrawingArea, ctx: &cairo::Context, width: f64, height: f64, 
         let y = if quiet {
             baseline
         } else {
-            // Корень вместо линейной шкалы: иначе редкие пики в десятки
-            // мегабайт прижимают обычную работу к нулю.
+            // Use a root instead of a linear scale; otherwise rare peaks of tens
+            // of megabytes squeeze ordinary activity against zero.
             baseline - (value / scale).sqrt() * (height - 6.0)
         };
         (x, y)
     };
 
-    // Приём — заливка, отдача — только контур: у отдачи почти всегда меньший
-    // масштаб, и заливка перекрывала бы её.
+    // Download is filled, upload is outline-only: upload is almost always smaller,
+    // and a fill would obscure it.
     for (values, filled) in [(&samples.down, true), (&samples.up, false)] {
         ctx.new_path();
         let mut previous: Option<(f64, f64)> = None;
@@ -140,9 +139,9 @@ fn draw(area: &gtk::DrawingArea, ctx: &cairo::Context, width: f64, height: f64, 
             match previous {
                 None => ctx.move_to(x, y),
                 Some((px, py)) => {
-                    // Сглаживание горизонтальными касательными: скачок с нуля
-                    // до мегабайта иначе рисуется отвесной стеной, и график
-                    // читается как заливка, а не как линия.
+                    // Smooth with horizontal tangents: a jump from zero to a
+                    // megabyte would otherwise be drawn as a sheer wall, making
+                    // the graph read as a fill rather than a line.
                     let control = step / 3.0;
                     ctx.curve_to(px + control, py, x - control, y, x, y);
                 }

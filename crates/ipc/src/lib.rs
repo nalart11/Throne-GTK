@@ -1,13 +1,13 @@
-//! Транспорт до ядра ThroneGtkCore.
+//! Transport to the ThroneGtkCore core.
 //!
-//! Ядро не поднимает сокет само: оно подключается к нашему, проверяя, что peer
-//! по SO_PEERCRED — его собственный родитель, и что бинарь родителя лежит рядом
-//! и называется `throne-gtk`. Поэтому GUI слушает, а ядро дозванивается.
+//! The core does not create the socket itself: it connects to ours, checking that
+//! the SO_PEERCRED peer is its own parent and that the parent's binary is nearby
+//! and named `throne-gtk`. Therefore, the GUI listens and the core connects.
 //!
-//! Кадры (little-endian):
-//!   запрос : [u32 req_id][u16 method_len][method][u32 payload_len][payload]
-//!   ответ  : [u32 req_id][u8 status][u32 data_len][data]
-//! status != 0 — тело ответа это текст ошибки.
+//! Frames (little-endian):
+//!   request: [u32 req_id][u16 method_len][method][u32 payload_len][payload]
+//!   response: [u32 req_id][u8 status][u32 data_len][data]
+//! status != 0 — the response body is an error message.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,8 @@ pub mod pb {
     include!(concat!(env!("OUT_DIR"), "/libcore.rs"));
 }
 
-/// Максимальный размер кадра. Ядро своё, но канал всё равно не должен уметь
-/// заставить нас выделить произвольный объём памяти по битому заголовку.
+/// Maximum frame size. The core is trusted, but the channel still must not be
+/// able to make us allocate an arbitrary amount of memory from a malformed header.
 const MAX_FRAME: u32 = 64 * 1024 * 1024;
 
 type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<Result<Vec<u8>>>>>>;
@@ -38,13 +38,13 @@ struct Call {
     reply: oneshot::Sender<Result<Vec<u8>>>,
 }
 
-/// Клиент одного живого соединения с ядром. Клонируется свободно.
+/// Client for one live connection to the core. Can be cloned freely.
 #[derive(Clone)]
 pub struct CoreClient {
     tx: mpsc::Sender<Call>,
 }
 
-/// Запущенный процесс ядра вместе с каналом к нему.
+/// The running core process together with its channel.
 pub struct Core {
     child: Child,
     socket_path: PathBuf,
@@ -52,7 +52,7 @@ pub struct Core {
 }
 
 impl Core {
-    /// Поднимает сокет, запускает `core_bin` и ждёт, пока ядро дозвонится.
+    /// Creates the socket, starts `core_bin`, and waits for the core to connect.
     pub async fn spawn(core_bin: &Path, socket_dir: &Path, debug: bool) -> Result<Self> {
         let socket_path = socket_dir.join(format!("core-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket_path);
@@ -69,22 +69,28 @@ impl Core {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("запуск ядра {}", core_bin.display()))?;
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = std::fs::remove_file(&socket_path);
+                return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
+            }
+        };
 
         pipe_core_logs(&mut child);
 
-        // Ядро ретраит подключение десять раз по 500 мс; ждём с запасом.
+        // The core retries the connection ten times at 500 ms intervals; wait with some margin.
         let accept = tokio::time::timeout(std::time::Duration::from_secs(15), listener.accept());
         let stream = match accept.await {
             Ok(Ok((stream, _))) => stream,
             Ok(Err(e)) => {
                 let _ = child.kill().await;
+                let _ = std::fs::remove_file(&socket_path);
                 return Err(e).context("accept от ядра");
             }
             Err(_) => {
                 let _ = child.kill().await;
+                let _ = std::fs::remove_file(&socket_path);
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
                      `throne-gtk` и лежит рядом с ядром",
@@ -102,12 +108,12 @@ impl Core {
     }
 
     pub async fn shutdown(mut self) {
-        let _ = self.client.stop().await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.client.stop()).await;
         let _ = self.child.kill().await;
         let _ = std::fs::remove_file(&self.socket_path);
     }
 
-    /// Успел ли процесс ядра умереть сам по себе.
+    /// Whether the core process has exited on its own.
     pub fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.try_wait().ok().flatten()
     }
@@ -139,12 +145,12 @@ fn pipe_core_logs(child: &mut Child) {
     }
 }
 
-/// Запрос на запуск конфига.
+/// Request to start the configuration.
 ///
-/// Собирать `pb::LoadConfigReq` вручную опасно: ядро разыменовывает часть
-/// полей без проверки на nil, и пропущенный `need_extra_process` роняет его
-/// паникой уже после того, как конфиг прошёл проверку. Здесь все такие поля
-/// заполнены всегда.
+/// Constructing `pb::LoadConfigReq` manually is dangerous: the core dereferences
+/// some fields without checking for nil, and omitting `need_extra_process` causes
+/// it to panic after the configuration has already passed validation. All such
+/// fields are always filled in here.
 pub fn load_request(core_config: String) -> pb::LoadConfigReq {
     pb::LoadConfigReq {
         core_config: Some(core_config),
@@ -157,8 +163,8 @@ pub fn load_request(core_config: String) -> pb::LoadConfigReq {
     }
 }
 
-/// То же для запроса на проверку скорости: там ядро разыменовывает свой набор
-/// полей.
+/// The same applies to the speed test request: the core dereferences its own set
+/// of fields there.
 pub fn speed_test_request(config: String) -> pb::SpeedTestRequest {
     pb::SpeedTestRequest {
         config: Some(config),
@@ -182,7 +188,7 @@ impl CoreClient {
         let pending: Pending = Arc::default();
         let next_id = Arc::new(AtomicU32::new(1));
 
-        // Писатель: кадрирует запросы и запоминает, кому вернуть ответ.
+        // Writer: frames requests and remembers where to send each response.
         {
             let pending = pending.clone();
             tokio::spawn(async move {
@@ -191,8 +197,7 @@ impl CoreClient {
                     pending.lock().await.insert(id, call.reply);
 
                     let m = call.method.as_bytes();
-                    let mut frame =
-                        Vec::with_capacity(4 + 2 + m.len() + 4 + call.payload.len());
+                    let mut frame = Vec::with_capacity(4 + 2 + m.len() + 4 + call.payload.len());
                     frame.extend_from_slice(&id.to_le_bytes());
                     frame.extend_from_slice(&(m.len() as u16).to_le_bytes());
                     frame.extend_from_slice(m);
@@ -209,7 +214,7 @@ impl CoreClient {
             });
         }
 
-        // Читатель: разбирает ответы и будит ждущих по req_id.
+        // Reader: parses responses and wakes the waiters by req_id.
         {
             let pending = pending.clone();
             tokio::spawn(async move {
@@ -236,7 +241,7 @@ impl CoreClient {
                         });
                     }
                 }
-                // Соединение закрылось — никто из ждущих ответа уже не дождётся.
+                // The connection closed — none of the response waiters will receive one.
                 for (_, reply) in pending.lock().await.drain() {
                     let _ = reply.send(Err(anyhow!("ядро закрыло соединение")));
                 }
@@ -264,9 +269,9 @@ impl CoreClient {
         Resp::decode(data.as_slice()).with_context(|| format!("разбор ответа {method}"))
     }
 
-    /// Часть методов отвечает `ErrorResp`, где ошибка — обычное поле, а не
-    /// ненулевой статус кадра. Разворачиваем её в `Err`, чтобы вызывающий код
-    /// не проверял два разных канала ошибок.
+    /// Some methods respond with `ErrorResp`, where the error is a regular field
+    /// rather than a nonzero frame status. Convert it to `Err` so callers do not
+    /// have to check two different error channels.
     async fn call_checked<Req: Message>(&self, method: &'static str, req: Req) -> Result<()> {
         let resp: pb::ErrorResp = self.call(method, req).await?;
         match resp.error() {

@@ -1,7 +1,7 @@
-//! Модель профиля. `outbound` хранится ровно в том виде, в каком его ждёт
-//! sing-box, — это и формат хранения, и то, что уходит в ядро. Никакого
-//! промежуточного представления протоколов: любой новый протокол sing-box
-//! начинает работать без изменений в этом крейте.
+//! Profile model. `outbound` is stored exactly in the form expected by
+//! sing-box; this is both the storage format and what is sent to the core. No
+//! intermediate protocol representation is used: any new sing-box protocol
+//! starts working without changes to this crate.
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
@@ -9,12 +9,12 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profile {
     pub id: i64,
-    /// Тип outbound-а sing-box: vless, vmess, shadowsocks, trojan, hysteria2, …
-    /// Плюс наши собственные: `xrayvless` и `custom`.
+    /// sing-box outbound type: vless, vmess, shadowsocks, trojan, hysteria2, …
+    /// Plus our own types: `xrayvless` and `custom`.
     pub kind: String,
     pub name: String,
     pub gid: i64,
-    /// Последняя задержка в мс. 0 — не тестировался, <0 — тест провалился.
+    /// Last latency in ms. 0 means untested, <0 means the test failed.
     pub latency: i32,
     pub dl_speed: String,
     pub ul_speed: String,
@@ -55,10 +55,10 @@ impl Profile {
         let Some(obj) = outbound.as_object() else {
             bail!("outbound должен быть JSON-объектом");
         };
-        // Два родных формата: sing-box (`type`) и Xray (`protocol` +
-        // `streamSettings`). Xray-форма приходит из баз Throne и от панелей,
-        // раздающих готовый конфиг; переводить её в sing-box нельзя без потерь —
-        // xmux, downloadSettings и прочие расширения там не выражаются.
+        // Two native formats: sing-box (`type`) and Xray (`protocol` +
+        // `streamSettings`). The Xray form comes from Throne databases and panels
+        // distributing ready-made configurations; converting it to sing-box loses
+        // xmux, downloadSettings, and other extensions that have no sing-box equivalent.
         let kind = match obj.get("type").and_then(Value::as_str) {
             Some(kind) if !kind.is_empty() => kind.to_string(),
             _ => match obj.get("protocol").and_then(Value::as_str) {
@@ -79,9 +79,9 @@ impl Profile {
         })
     }
 
-    /// Адрес сервера в виде `host:port` — для колонки в списке. У протоколов
-    /// без единственной точки входа (wireguard с несколькими пирами, custom)
-    /// возвращает то, что удалось найти.
+    /// Server address in `host:port` form for the list column. For protocols
+    /// without a single endpoint (wireguard with multiple peers, custom),
+    /// returns whatever could be found.
     pub fn address(&self) -> String {
         if self.is_xray_native() {
             return self.xray_address();
@@ -92,7 +92,7 @@ impl Profile {
             .and_then(Value::as_str)
             .map(str::to_string)
             .or_else(|| {
-                // wireguard: сервер лежит внутри первого пира
+                // wireguard: the server is inside the first peer
                 get("peers")
                     .and_then(Value::as_array)
                     .and_then(|p| p.first())
@@ -119,8 +119,8 @@ impl Profile {
         }
     }
 
-    /// Адрес из outbound-а в формате Xray: он лежит либо в `settings`, либо в
-    /// `settings.vnext[0]` — панели пишут и так, и так.
+    /// Address from an Xray-format outbound: it is either in `settings` or in
+    /// `settings.vnext[0]`; panels use both layouts.
     fn xray_address(&self) -> String {
         let settings = &self.outbound["settings"];
         let node = match settings["vnext"].as_array().and_then(|v| v.first()) {
@@ -137,15 +137,15 @@ impl Profile {
         }
     }
 
-    /// Копия outbound-а с проставленным тегом — под этим именем профиль
-    /// попадает в конфиг и во все ответы ядра.
+    /// A copy of the outbound with its tag set; under this name the profile
+    /// appears in the configuration and all core responses.
     pub fn tagged(&self, tag: &str) -> Value {
         let mut out = self.outbound.clone();
         if let Some(obj) = out.as_object_mut() {
             obj.insert("tag".into(), Value::String(tag.to_string()));
-            // Профиль, разобранный из ссылки с транспортом XHTTP, хранится в
-            // форме sing-box, но исполняется Xray; sing-box такого типа не
-            // знает и должен видеть обычный vless.
+            // A profile parsed from a link with XHTTP transport is stored in
+            // sing-box form but runs in Xray; sing-box does not know this type
+            // and must see ordinary vless.
             if self.kind == "xrayvless" && obj.contains_key("type") {
                 obj.insert("type".into(), Value::String("vless".into()));
             }
@@ -153,12 +153,12 @@ impl Profile {
         out
     }
 
-    /// Профиль исполняется Xray-ядром, а не sing-box.
+    /// The profile is executed by the Xray core, not sing-box.
     pub fn is_xray(&self) -> bool {
         self.kind.starts_with("xray")
     }
 
-    /// Outbound уже записан в формате Xray и передаётся ему как есть.
+    /// The outbound is already in Xray format and is passed through unchanged.
     pub fn is_xray_native(&self) -> bool {
         self.outbound.get("protocol").is_some() && self.outbound.get("type").is_none()
     }
@@ -172,11 +172,11 @@ impl Profile {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Group {
     pub id: i64,
     pub name: String,
-    /// Пусто у ручной группы, иначе — ссылка на подписку.
+    /// Empty for a manual group; otherwise, the subscription link.
     pub url: String,
     pub info: String,
     pub archive: bool,
@@ -189,22 +189,6 @@ pub struct Group {
 impl Group {
     pub fn is_subscription(&self) -> bool {
         !self.url.is_empty()
-    }
-}
-
-impl Default for Group {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            name: String::new(),
-            url: String::new(),
-            info: String::new(),
-            archive: false,
-            skip_auto_update: false,
-            sub_last_update: 0,
-            created_at: 0,
-            updated_at: 0,
-        }
     }
 }
 
@@ -244,8 +228,9 @@ mod tests {
 
     #[test]
     fn xray_profile_downgrades_type_for_singbox() {
-        let mut p = Profile::from_outbound(json!({"type": "vless", "server": "a", "server_port": 1}))
-            .unwrap();
+        let mut p =
+            Profile::from_outbound(json!({"type": "vless", "server": "a", "server_port": 1}))
+                .unwrap();
         p.kind = "xrayvless".into();
         assert_eq!(p.tagged("proxy")["type"], "vless");
         assert_eq!(p.tagged("proxy")["tag"], "proxy");
@@ -268,7 +253,7 @@ mod tests {
         assert!(p.is_xray());
         assert!(p.is_xray_native());
         assert_eq!(p.address(), "h2.example:443");
-        // Тег проставляется, но структура Xray не переписывается.
+        // The tag is set, but the Xray structure is not rewritten.
         let tagged = p.tagged("proxy");
         assert_eq!(tagged["tag"], "proxy");
         assert_eq!(tagged["protocol"], "vless");

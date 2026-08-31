@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Кладёт libcronet.so рядом с ядром: выхлоп naive грузит её при первом
-# использовании. Статически она не линкуется — в поставляемом архиве
-# libcronet.a лежат объекты сразу под несколько архитектур, и GNU ld
-# отказывается его читать.
+# Place libcronet.so next to the core: the naive outbound loads it on first
+# use. It is not linked statically — the supplied archive
+# libcronet.a contains objects for several architectures, and GNU ld
+# refuses to read it.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

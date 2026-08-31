@@ -1,4 +1,4 @@
-//! Журнал ядра.
+//! Core log.
 
 use std::rc::Rc;
 
@@ -64,7 +64,14 @@ impl LogsPage {
             let page = Rc::downgrade(&page);
             move |button| {
                 let Some(page) = page.upgrade() else { return };
-                let text = page.state.log.borrow().iter().cloned().collect::<Vec<_>>().join("\n");
+                let text = page
+                    .state
+                    .log
+                    .borrow()
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 button.clipboard().set_text(&text);
             }
         });
@@ -82,11 +89,10 @@ impl LogsPage {
 
     pub fn refresh(&self) {
         let buffer = self.view.buffer();
-        // Прокрутку двигаем только если пользователь и так внизу: иначе
-        // читать середину журнала на активном соединении невозможно.
+        // Scroll only if the user is already at the bottom; otherwise reading
+        // the middle of the log during an active connection is impossible.
         let adjustment = self.scroller.vadjustment();
-        let at_bottom =
-            adjustment.value() + adjustment.page_size() >= adjustment.upper() - 24.0;
+        let at_bottom = adjustment.value() + adjustment.page_size() >= adjustment.upper() - 24.0;
 
         let text = self
             .state

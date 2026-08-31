@@ -1,4 +1,4 @@
-//! Где что лежит.
+//! Where things are located.
 
 use std::path::PathBuf;
 
@@ -23,9 +23,9 @@ pub fn database() -> PathBuf {
     config_dir().join("throne-gtk.db")
 }
 
-/// Каталог для сокета связи с ядром. Живёт в runtime-каталоге пользователя:
-/// сокет не должен переживать перезагрузку и не должен быть виден другим
-/// пользователям.
+/// Directory for the socket used to communicate with the core. It lives in the
+/// user’s runtime directory: the socket must not survive a reboot or be visible
+/// to other users.
 pub fn runtime_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -34,14 +34,14 @@ pub fn runtime_dir() -> PathBuf {
         .join("throne-gtk")
 }
 
-/// База оригинального Throne — источник для импорта.
+/// The original Throne database — the import source.
 pub fn throne_database() -> PathBuf {
     config_home().join("Throne/config/throne.db")
 }
 
-/// Ядро ищется рядом с исполняемым файлом: оно проверяет, что родительский
-/// процесс называется `throne-gtk` и лежит в той же папке, поэтому иначе
-/// просто откажется работать.
+/// The core is looked up next to the executable: it checks that the parent
+/// process is named `throne-gtk` and is in the same directory, otherwise it
+/// simply refuses to run.
 pub fn core_binary() -> PathBuf {
     if let Some(path) = std::env::var_os("THRONE_GTK_CORE") {
         return PathBuf::from(path);

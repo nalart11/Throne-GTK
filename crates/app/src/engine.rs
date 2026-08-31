@@ -1,10 +1,10 @@
-//! Фоновый исполнитель: всё, что нельзя делать в потоке интерфейса.
+//! Background executor: everything that cannot be done on the UI thread.
 //!
-//! Интерфейс не ждёт ядро и не ходит в сеть сам. Он шлёт [`Command`] и
-//! получает [`Event`] — так подключение, тест двух сотен серверов и обновление
-//! подписки не морозят окно.
+//! The interface does not wait for the core or access the network itself. It sends
+//! [`Command`] and receives [`Event`], so connecting, testing two hundred servers,
+//! and updating a subscription do not freeze the window.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -14,36 +14,36 @@ use throne_ipc::pb;
 use throne_ipc::Core;
 use tokio::sync::mpsc;
 
-/// Что интерфейс просит сделать.
+/// What the interface requests.
 #[derive(Debug)]
 pub enum Command {
     Connect {
         profile: Box<Profile>,
         settings: Box<Settings>,
     },
-    /// Подключение с автовыбором: ядро само держит лучший сервер группы.
+    /// Connect with auto-selection: the core keeps the best server in the group.
     ConnectAuto {
         profiles: Vec<Profile>,
-        /// Группа, к которой относится автовыбор — нужна интерфейсу, чтобы
-        /// вернуть отметку на правильную строку.
+        /// Group associated with auto-selection, needed so the interface can
+        /// return the marker to the correct row.
         gid: i64,
         settings: Box<Settings>,
     },
-    /// Перепроверить всех участников автовыбора прямо сейчас.
+    /// Recheck all auto-selection members right now.
     AutoRecheck,
-    /// Закрепить участника вручную; пустая строка снимает закрепление.
+    /// Pin a member manually; an empty string removes the pin.
     AutoPin(String),
     Disconnect,
-    /// Прогнать задержку по списку профилей. `ids` идёт параллельно `profiles`
-    /// и возвращается в событиях, чтобы интерфейс знал, чью строку обновлять.
+    /// Test latency across the profile list. `ids` runs alongside `profiles` and
+    /// is returned in events so the interface knows which row to update.
     TestLatency {
         profiles: Vec<Profile>,
         ids: Vec<i64>,
         settings: Box<Settings>,
     },
     StopTest,
-    /// Замер скорости одного сервера. Идёт в своём ядре и не трогает рабочее
-    /// соединение — как и проверка задержек.
+    /// Measure one server’s speed. It runs in its own core and does not affect
+    /// the active connection, just like latency testing.
     SpeedTest {
         profile: Box<Profile>,
         id: i64,
@@ -53,8 +53,10 @@ pub enum Command {
         gid: i64,
         url: String,
         user_agent: String,
+        send_hwid: bool,
+        custom_hwid_params: String,
     },
-    /// Проверить, что конфиг вообще собирается и принимается ядром.
+    /// Check that the configuration builds and is accepted by the core.
     CheckConfig {
         profile: Box<Profile>,
         settings: Box<Settings>,
@@ -62,7 +64,7 @@ pub enum Command {
     Shutdown,
 }
 
-/// Состояние соединения — то, что показывает главный экран.
+/// Connection state shown by the main screen.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
     Disconnected,
@@ -71,14 +73,17 @@ pub enum Status {
     Failed(String),
 }
 
-/// Что произошло в фоне.
+/// What happened in the background.
 #[derive(Debug)]
 pub enum Event {
     Status(Status),
-    /// Байты за последний интервал: скорость считается интерфейсом.
-    Traffic { down: i64, up: i64 },
+    /// Bytes during the last interval; the interface calculates the speed.
+    Traffic {
+        down: i64,
+        up: i64,
+    },
     Connections(Vec<Connection>),
-    /// Состояние автовыбора: кто выбран сейчас и сколько серверов живо.
+    /// Auto-selection state: who is selected and how many servers are alive.
     AutoStatus {
         selected: String,
         pinned: String,
@@ -86,11 +91,19 @@ pub enum Event {
         total: i32,
         suspended: bool,
     },
-    LatencyResult { id: i64, latency: i32 },
-    TestFinished { tested: usize },
-    /// Промежуточное состояние замера: ядро отдаёт его по запросу, пока идёт
-    /// прогон, — иначе минуту непонятно, жив ли замер.
-    SpeedProgress { id: i64, stage: String },
+    LatencyResult {
+        id: i64,
+        latency: i32,
+    },
+    TestFinished {
+        tested: usize,
+    },
+    /// Intermediate measurement state: the core returns it on request while the
+    /// test runs, otherwise it is unclear for a minute whether the test is alive.
+    SpeedProgress {
+        id: i64,
+        stage: String,
+    },
     SpeedResult {
         id: i64,
         download: String,
@@ -108,7 +121,7 @@ pub enum Event {
     Error(String),
 }
 
-/// Живое соединение в удобной для таблицы форме.
+/// A live connection in a table-friendly form.
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub id: String,
@@ -126,9 +139,13 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Поднимает рабочий поток с собственным исполнителем tokio.
-    /// `events` — сторона отправки; интерфейс держит приёмник.
-    pub fn start(core_bin: PathBuf, runtime_dir: PathBuf, events: async_channel::Sender<Event>) -> Self {
+    /// Starts the worker thread with its own Tokio executor.
+    /// `events` is the sending side; the interface holds the receiver.
+    pub fn start(
+        core_bin: PathBuf,
+        runtime_dir: PathBuf,
+        events: async_channel::Sender<Event>,
+    ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         std::thread::Builder::new()
             .name("throne-engine".into())
@@ -145,19 +162,19 @@ impl Engine {
     }
 
     pub fn send(&self, command: Command) {
-        // Провал возможен только после Shutdown — тогда команда уже не нужна.
+        // Failure is possible only after Shutdown, when the command is no longer needed.
         let _ = self.commands.send(command);
     }
 }
 
-/// Ядро живёт ровно столько, сколько длится соединение: держать его
-/// запущенным вхолостую незачем — оно тянет память под sing-box и Xray.
+/// The core lives exactly as long as the connection: there is no reason to keep
+/// it running idle, as it consumes memory for sing-box and Xray.
 struct Running {
     core: Core,
     profile_id: i64,
     tags: Vec<String>,
-    /// Теги участников автовыбора в порядке профилей: по ним ответ ядра
-    /// превращается обратно в имя сервера.
+    /// Auto-selection member tags in profile order: they turn the core response
+    /// back into a server name.
     auto_members: Vec<(String, String)>,
 }
 
@@ -225,8 +242,8 @@ async fn run(
                     }
                     Command::AutoPin(member) => {
                         if let Some(r) = &running {
-                            // Пустой member снимает закрепление — так это
-                            // понимает и само ядро.
+                            // An empty member removes the pin; the core understands
+                            // it this way too.
                             let tag = r
                                 .auto_members
                                 .iter()
@@ -273,8 +290,8 @@ async fn run(
                         let _ = events.send(Event::ConfigChecked(outcome)).await;
                     }
                     Command::TestLatency { profiles, ids, settings } => {
-                        // Тест поднимает собственное ядро и не трогает рабочее:
-                        // проверять серверы можно, не разрывая соединение.
+                        // The test starts its own core and does not affect the active
+                        // one, so servers can be checked without dropping the connection.
                         let events = events.clone();
                         let core_bin = core_bin.clone();
                         let runtime_dir = runtime_dir.clone();
@@ -311,10 +328,21 @@ async fn run(
                             let _ = r.core.client.stop_test().await;
                         }
                     }
-                    Command::FetchSubscription { gid, url, user_agent } => {
+                    Command::FetchSubscription {
+                        gid,
+                        url,
+                        user_agent,
+                        send_hwid,
+                        custom_hwid_params,
+                    } => {
                         let events = events.clone();
                         tokio::spawn(async move {
-                            let result = fetch_subscription(&url, &user_agent)
+                            let result = fetch_subscription(
+                                &url,
+                                &user_agent,
+                                send_hwid,
+                                &custom_hwid_params,
+                            )
                                 .await
                                 .map_err(|e| format!("{e:#}"));
                             let _ = events.send(Event::Subscription { gid, result }).await;
@@ -326,7 +354,7 @@ async fn run(
             _ = poll.tick() => {
                 let Some(r) = &mut running else { continue };
 
-                // Ядро могло упасть само — например, из-за отказа TUN.
+                // The core may have crashed on its own, for example because of a TUN failure.
                 if let Some(status) = r.core.exited() {
                     let _ = events
                         .send(Event::Status(Status::Failed(format!(
@@ -404,8 +432,8 @@ fn load_request(generated: &GeneratedConfig, settings: &Settings) -> pb::LoadCon
 }
 
 async fn connect(
-    core_bin: &PathBuf,
-    runtime_dir: &PathBuf,
+    core_bin: &Path,
+    runtime_dir: &Path,
     profile: &Profile,
     settings: &Settings,
 ) -> Result<Running> {
@@ -435,11 +463,11 @@ async fn connect(
     })
 }
 
-/// Подключение с автовыбором. Профили передаются уже отсортированными: их
-/// порядок ядро принимает за исходное ранжирование.
+/// Connect with auto-selection. Profiles are already sorted: the core treats
+/// their order as the initial ranking.
 async fn connect_auto(
-    core_bin: &PathBuf,
-    runtime_dir: &PathBuf,
+    core_bin: &Path,
+    runtime_dir: &Path,
     profiles: &[Profile],
     gid: i64,
     settings: &Settings,
@@ -472,8 +500,8 @@ async fn connect_auto(
         .zip(profiles.iter().map(|p| p.name.clone()))
         .collect();
 
-    // Трафик ядро считает на том outbound-е, который реально дозвонился, а
-    // не на группе: суммировать нужно и селектор, и всех его участников.
+    // The core counts traffic on the outbound that actually connected, not on
+    // the group: both the selector and all its members must be summed.
     let mut tags = vec![throne_config::generate::tags::PROXY.to_string()];
     tags.extend(auto_members.iter().map(|(tag, _)| tag.clone()));
 
@@ -486,21 +514,24 @@ async fn connect_auto(
 }
 
 async fn check_config(
-    core_bin: &PathBuf,
-    runtime_dir: &PathBuf,
+    core_bin: &Path,
+    runtime_dir: &Path,
     profile: &Profile,
     settings: &Settings,
 ) -> Result<()> {
     let generated = throne_config::generate(profile, settings).context("сборка конфига")?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
-    let outcome = core.client.check_config(load_request(&generated, settings)).await;
+    let outcome = core
+        .client
+        .check_config(load_request(&generated, settings))
+        .await;
     core.shutdown().await;
     outcome
 }
 
 async fn test_latency(
-    core_bin: &PathBuf,
-    runtime_dir: &PathBuf,
+    core_bin: &Path,
+    runtime_dir: &Path,
     profiles: Vec<Profile>,
     ids: Vec<i64>,
     settings: &Settings,
@@ -510,7 +541,8 @@ async fn test_latency(
         let _ = events.send(Event::TestFinished { tested: 0 }).await;
         return Ok(());
     }
-    let generated = throne_config::generate_test(&profiles, settings).context("сборка конфига теста")?;
+    let generated =
+        throne_config::generate_test(&profiles, settings).context("сборка конфига теста")?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
 
     let request = pb::TestReq {
@@ -529,13 +561,17 @@ async fn test_latency(
 
     if let Ok(response) = &outcome {
         for result in &response.results {
-            // Тег вида `p-<индекс>` привязывает результат к строке списка.
-            let Some(index) = generated.tags.iter().position(|t| t == result.outbound_tag()) else {
+            // A tag of the form `p-<index>` binds the result to a list row.
+            let Some(index) = generated
+                .tags
+                .iter()
+                .position(|t| t == result.outbound_tag())
+            else {
                 continue;
             };
             let Some(&id) = ids.get(index) else { continue };
-            // Провал теста кодируем отрицательной задержкой: ноль означает
-            // «ещё не проверяли», и путать эти два состояния нельзя.
+            // Encode a failed test as negative latency: zero means “not checked
+            // yet,” and these two states must not be confused.
             let latency = if result.error().is_empty() {
                 result.latency_ms().max(1)
             } else {
@@ -551,11 +587,11 @@ async fn test_latency(
     outcome.map(|_| ())
 }
 
-/// Замер скорости. Ядро считает его само; наша задача — собрать конфиг,
-/// пока идёт прогон опрашивать состояние и вернуть результат одной записью.
+/// Speed measurement. The core performs it; our task is to build the config,
+/// poll the state while it runs, and return the result as one record.
 async fn speed_test(
-    core_bin: &PathBuf,
-    runtime_dir: &PathBuf,
+    core_bin: &Path,
+    runtime_dir: &Path,
     profile: Profile,
     id: i64,
     settings: &Settings,
@@ -574,7 +610,7 @@ async fn speed_test(
     request.need_xray = Some(generated.need_xray);
     request.xray_config = Some(generated.xray_config.clone());
 
-    // Пока ядро занято замером, спрашиваем его о ходе дела.
+    // While the core is measuring, query it for progress.
     let progress = {
         let client = core.client.clone();
         let events = events.clone();
@@ -588,7 +624,9 @@ async fn speed_test(
                 if !state.is_running() {
                     continue;
                 }
-                let Some(result) = &state.result else { continue };
+                let Some(result) = &state.result else {
+                    continue;
+                };
                 let stage = if !result.dl_speed().is_empty() {
                     format!("приём {}", result.dl_speed())
                 } else if !result.server_name().is_empty() {
@@ -625,8 +663,14 @@ async fn speed_test(
     Ok(())
 }
 
-async fn fetch_subscription(url: &str, user_agent: &str) -> Result<subscription::Parsed> {
-    let (body, userinfo) = subscription::fetch(url, user_agent, 30).await?;
+async fn fetch_subscription(
+    url: &str,
+    user_agent: &str,
+    send_hwid: bool,
+    custom_hwid_params: &str,
+) -> Result<subscription::Parsed> {
+    let (body, userinfo) =
+        subscription::fetch(url, user_agent, 30, send_hwid, custom_hwid_params).await?;
     let mut parsed = subscription::parse(&body)?;
     if !userinfo.is_empty() {
         parsed.info = subscription::format_userinfo(&userinfo);

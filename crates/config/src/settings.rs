@@ -1,19 +1,19 @@
-//! Настройки приложения. Всё, что влияет на генерируемый конфиг, живёт здесь,
-//! сериализуется в таблицу `settings` по одному ключу на поле и переживает
-//! добавление новых полей: неизвестные ключи игнорируются, отсутствующие
-//! берутся из `Default`.
+//! Application settings. Everything affecting the generated configuration lives here,
+//! is serialized into the `settings` table with one key per field and survives
+//! the addition of new fields: unknown keys are ignored, and missing ones
+//! come from `Default`.
 
 use serde::{Deserialize, Serialize};
 
 use crate::route::RouteRule;
 
-/// Как перехватывается трафик системы.
+/// How system traffic is intercepted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyMode {
-    /// Только локальный mixed-порт: приложения настраиваются сами.
+    /// Local mixed port only: applications configure themselves.
     Proxy,
-    /// TUN-интерфейс: весь трафик системы. Требует привилегий у ядра.
+    /// TUN interface: all system traffic. Requires core privileges.
     Vpn,
 }
 
@@ -23,7 +23,7 @@ impl ProxyMode {
     }
 }
 
-/// Реализация сетевого стека TUN.
+/// TUN network stack implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TunStack {
@@ -42,7 +42,7 @@ impl TunStack {
     }
 }
 
-/// Какие адреса резолвить и куда ходить.
+/// Which addresses to resolve and where to connect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DomainStrategy {
@@ -68,7 +68,7 @@ impl DomainStrategy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    // ── вход ────────────────────────────────────────────────────────────
+    // ── inbound ──────────────────────────────────────────────────────────
     pub mode: ProxyMode,
     pub mixed_port: u16,
     pub allow_lan: bool,
@@ -84,67 +84,68 @@ pub struct Settings {
 
     // ── DNS ─────────────────────────────────────────────────────────────
     pub dns_enabled: bool,
-    /// Резолвер для проксируемых доменов; ходит через прокси.
+    /// Resolver for proxied domains; connects through the proxy.
     pub dns_remote: String,
-    /// Резолвер для прямых соединений; ходит напрямую. По умолчанию DoH, а не
-    /// обычный UDP: провайдеры подделывают ответы на 53-м порту, и тогда мимо
-    /// прокси не резолвится ничего — включая зеркало, с которого ядро тянет
-    /// готовые списки при старте.
+    /// Resolver for direct connections; connects directly. DoH is used by default
+    /// instead of ordinary UDP: providers forge responses on port 53, preventing
+    /// resolution outside the proxy, including the mirror from which the core
+    /// downloads ready-made lists at startup.
     pub dns_direct: String,
     pub dns_strategy: DomainStrategy,
     pub dns_routing: bool,
     pub fakedns: bool,
 
-    // ── маршрутизация ───────────────────────────────────────────────────
+    // ── routing ───────────────────────────────────────────────────────────
     pub bypass_private: bool,
-    /// Правила, заданные в интерфейсе. Порядок важен: применяется первое
-    /// подошедшее.
+    /// Rules defined in the interface. Order matters: the first matching rule applies.
     pub route_rules: Vec<RouteRule>,
-    /// Дополнительные правила route в исходном виде sing-box; вставляются
-    /// после правил из интерфейса, перед автоматическими.
+    /// Additional route rules in their original sing-box form; inserted after
+    /// interface rules and before automatic ones.
     pub custom_route_rules: String,
 
-    // ── ядро ────────────────────────────────────────────────────────────
+    // ── core ──────────────────────────────────────────────────────────────
     pub log_level: String,
     pub stats_enabled: bool,
     pub mux_enabled: bool,
     pub mux_protocol: String,
     pub mux_max_streams: u32,
 
-    // ── тесты ───────────────────────────────────────────────────────────
+    // ── tests ─────────────────────────────────────────────────────────────
     pub test_url: String,
     pub test_timeout_ms: i32,
     pub test_concurrency: i32,
-    /// Что мерить при замере скорости. Отдача считается отдельно: она нужна
-    /// далеко не всем, а времени занимает столько же, сколько приём.
+    /// What to measure during a speed test. Upload is measured separately: few
+    /// users need it, and it takes as long as download.
     pub speed_test_download: bool,
     pub speed_test_upload: bool,
     pub speed_test_timeout_ms: i32,
 
-    // ── автовыбор сервера ───────────────────────────────────────────────
-    /// Как часто перепроверяются лучшие серверы группы.
+    // ── automatic server selection ────────────────────────────────────────
+    /// How often the group's best servers are retested.
     pub auto_interval_secs: i64,
-    /// На сколько миллисекунд претендент должен обгонять текущий сервер,
-    /// чтобы соединение переехало. Без запаса выбор дёргался бы от шума.
+    /// How many milliseconds a candidate must beat the current server by for
+    /// the connection to move. Without a margin, noise would make selection jump.
     pub auto_tolerance_ms: i32,
-    /// Раскладывать соединения по нескольким хорошим серверам вместо одного.
+    /// Distribute connections across several good servers instead of one.
     pub auto_balance: bool,
 
-    // ── подписки ────────────────────────────────────────────────────────
+    // ── subscriptions ─────────────────────────────────────────────────────
     pub sub_auto_update: bool,
     pub sub_auto_update_minutes: i64,
     pub sub_user_agent: String,
+    pub sub_send_hwid: bool,
+    pub sub_custom_hwid_params: String,
 
-    /// Куда ядро складывает свой кэш. Не сохраняется в базу: это свойство
-    /// установки, а не настройка — приложение проставляет путь при запуске,
-    /// иначе ядро пишет `cache.db` в текущий каталог.
+    /// Where the core stores its cache. Not saved to the database: this is an
+    /// installation property, not a setting; the application sets the path at
+    /// startup, otherwise the core writes `cache.db` to the current directory.
     #[serde(skip)]
     pub cache_file: String,
 
-    // ── интерфейс ───────────────────────────────────────────────────────
-    /// Закрытие окна прячет программу в значок, а не выключает её. Без
-    /// значка в системе настройка ни на что не влияет: спрятать окно
-    /// некуда.
+    // ── interface ─────────────────────────────────────────────────────────
+    /// Closing the window hides the application in the tray instead of quitting it.
+    /// Without a system tray icon, this setting has no effect: there is nowhere
+    /// to hide the window.
     pub close_to_tray: bool,
     pub start_minimized: bool,
     pub connect_last_on_start: bool,
@@ -160,7 +161,7 @@ impl Default for Settings {
             sniffing: true,
 
             tun_stack: TunStack::Mixed,
-            tun_mtu: 9000,
+            tun_mtu: 1500,
             tun_strict_route: true,
             tun_ipv4_cidr: "172.19.0.1/30".into(),
             tun_ipv6_cidr: "fdfe:dcba:9876::1/126".into(),
@@ -197,6 +198,8 @@ impl Default for Settings {
             sub_auto_update: false,
             sub_auto_update_minutes: 360,
             sub_user_agent: concat!("throne-gtk/", env!("CARGO_PKG_VERSION")).into(),
+            sub_send_hwid: false,
+            sub_custom_hwid_params: String::new(),
 
             cache_file: String::new(),
 

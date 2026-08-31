@@ -1,7 +1,7 @@
-//! Страница со списком серверов.
+//! Server list page.
 //!
-//! Строка показывает ровно то, по чему выбирают сервер: имя, куда он ведёт и
-//! насколько быстро отвечает. Всё остальное — в контекстном меню.
+//! A row shows exactly what is used to choose a server: its name, destination,
+//! and response speed. Everything else is in the context menu.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,10 +18,10 @@ pub struct ServersPage {
     state: Rc<State>,
     list: gtk::ListBox,
     groups_drop: gtk::DropDown,
-    /// Модель списка групп создаётся один раз и дальше только наполняется:
-    /// подмена модели у DropDown освобождает его внутреннее выделение, и
-    /// следующий set_selected обращается к уже мёртвому объекту — падение
-    /// в g_object_notify_by_pspec.
+    /// The group list model is created once and only populated afterward:
+    /// replacing a DropDown model releases its internal selection, and the next
+    /// set_selected accesses an already dead object, causing a crash in
+    /// g_object_notify_by_pspec.
     groups_model: gtk::StringList,
     group_info: gtk::Label,
     test_button: gtk::Button,
@@ -30,8 +30,8 @@ pub struct ServersPage {
     empty: adw::StatusPage,
     scroller: gtk::ScrolledWindow,
 
-    /// Строки по id профиля — чтобы точечно обновлять задержку, не перестраивая
-    /// список: при двух сотнях серверов пересборка заметна глазом.
+    /// Rows by profile ID, so latency can be updated without rebuilding the list:
+    /// rebuilding is visibly noticeable with two hundred servers.
     rows: RefCell<HashMap<i64, Row>>,
     groups: RefCell<Vec<Group>>,
     on_activated: RefCell<Option<Rc<dyn Fn()>>>,
@@ -39,19 +39,18 @@ pub struct ServersPage {
     on_notify: RefCell<Option<Rc<dyn Fn(String)>>>,
     on_speed_test: RefCell<Option<Rc<dyn Fn(i64)>>>,
     on_auto_pin: RefCell<Option<Rc<dyn Fn(String)>>>,
-    /// Список приводится в соответствие данным: сигналы виджетов в это время
-    /// не означают действие человека.
+    /// Brings the list into line with the data: widget signals during this time
+    /// do not represent user actions.
     syncing: std::cell::Cell<bool>,
 }
 
 #[derive(Clone)]
 struct Row {
     root: gtk::ListBoxRow,
-    /// Внутренний контейнер: именно на нём висит оформление строки, включая
-    /// засечку активного сервера.
+    /// Internal container: row styling, including the active-server marker, is attached here.
     content: gtk::Box,
     latency: gtk::Label,
-    /// Скорость и страна из последнего замера; пусто — не мерили.
+    /// Speed and country from the latest measurement; empty means not measured.
     speed: gtk::Label,
 }
 
@@ -160,7 +159,7 @@ impl ServersPage {
                 if let Some(id) = id {
                     this.state.selected_id.set(unsafe { *id.as_ref() });
                     let _ = this.state.save_settings();
-                    // Колбэк вызываем вне borrow: он трогает те же виджеты.
+                    // Invoke the callback outside the borrow: it touches the same widgets.
                     let callback = this.on_selection.borrow().clone();
                     if let Some(callback) = callback {
                         callback();
@@ -169,8 +168,8 @@ impl ServersPage {
             }
         });
 
-        // Двойной клик и Enter подключают — выбор мышью сам по себе ничего
-        // не разрывает.
+        // Double-click and Enter connect; selecting with the mouse alone does
+        // not interrupt anything.
         self.list.connect_row_activated({
             let this = Rc::downgrade(self);
             move |_, _| {
@@ -190,8 +189,8 @@ impl ServersPage {
             }
         });
 
-        // Правая кнопка открывает меню строки. Действия немногочисленны и
-        // работают с той строкой, по которой щёлкнули, а не с выделенной.
+        // The right mouse button opens the row menu. Its few actions apply to
+        // the clicked row, not the selected one.
         let gesture = gtk::GestureClick::builder()
             .button(gtk::gdk::BUTTON_SECONDARY)
             .build();
@@ -199,7 +198,9 @@ impl ServersPage {
             let this = Rc::downgrade(self);
             move |gesture, _, x, y| {
                 let Some(this) = this.upgrade() else { return };
-                let Some(row) = this.list.row_at_y(y as i32) else { return };
+                let Some(row) = this.list.row_at_y(y as i32) else {
+                    return;
+                };
                 gesture.set_state(gtk::EventSequenceState::Claimed);
                 this.list.select_row(Some(&row));
                 this.show_row_menu(&row, x, y);
@@ -226,15 +227,15 @@ impl ServersPage {
         });
     }
 
-    /// Меню строки: закрепить в автовыборе, замерить скорость, скопировать
-    /// ссылку, удалить. Действия выполняются сразу — подтверждения нет.
+    /// Row menu: pin for auto-selection, measure speed, copy the link, or delete.
+    /// Actions execute immediately; there is no confirmation.
     fn show_row_menu(self: &Rc<Self>, row: &gtk::ListBoxRow, x: f64, y: f64) {
         let id = unsafe { row.data::<i64>("profile-id") };
         let Some(id) = id else { return };
         let id = unsafe { *id.as_ref() };
 
-        // Строка автовыбора сама по себе не сервер: замерять и копировать
-        // у неё нечего, зато с неё снимают закрепление.
+        // The auto-selection row is not a server itself: there is nothing to
+        // measure or copy, but its pin can be removed.
         let is_auto_row = id < 0;
         let auto_running = self.state.connected_id() < 0;
 
@@ -268,7 +269,10 @@ impl ServersPage {
             .css_classes(["flat"])
             .halign(gtk::Align::Fill)
             .build();
-        if let Some(label) = measure.child().and_then(|c| c.downcast::<gtk::Label>().ok()) {
+        if let Some(label) = measure
+            .child()
+            .and_then(|c| c.downcast::<gtk::Label>().ok())
+        {
             label.set_xalign(0.0);
         }
         let delete = gtk::Button::builder()
@@ -308,7 +312,7 @@ impl ServersPage {
             move |_| {
                 popover.popdown();
                 let Some(this) = this.upgrade() else { return };
-                // Пустое имя означает «сними закрепление».
+                // An empty name means “remove the pin.”
                 let name = if is_auto_row {
                     String::new()
                 } else {
@@ -390,8 +394,8 @@ impl ServersPage {
         popover.popup();
     }
 
-    /// Сообщения показывает окно; страница о нём не знает и просто зовёт
-    /// колбэк, который окно ей выдало.
+    /// The window displays messages; the page knows nothing about them and only
+    /// calls the callback supplied by the window.
     fn notify(&self, message: &str) {
         if let Some(callback) = self.on_notify.borrow().clone() {
             callback(message.to_string());
@@ -410,8 +414,8 @@ impl ServersPage {
         *self.on_auto_pin.borrow_mut() = Some(Rc::new(callback));
     }
 
-    /// Ход замера показываем прямо в строке: тост исчезает, а замер идёт
-    /// секунды, и человеку нужно видеть, что именно сейчас происходит.
+    /// Show measurement progress directly in the row: the toast disappears while
+    /// the measurement takes seconds, so the user needs to see what is happening.
     pub fn set_speed_progress(&self, id: i64, stage: &str) {
         let rows = self.rows.borrow();
         let Some(row) = rows.get(&id) else { return };
@@ -445,7 +449,7 @@ impl ServersPage {
         &self.update_button
     }
 
-    /// Полная пересборка: после смены группы, импорта или обновления подписки.
+    /// Full rebuild: after changing the group, importing, or updating a subscription.
     pub fn reload(self: &Rc<Self>) {
         self.reload_groups();
 
@@ -466,8 +470,8 @@ impl ServersPage {
         let selected = self.state.selected_id.get();
         let mut selected_row = None;
 
-        // Первой строкой — автовыбор по всей группе. Он не сервер, а способ
-        // подключения, поэтому стоит над списком, а не среди него.
+        // The first row is auto-selection for the whole group. It is a connection
+        // method, not a server, so it appears above the list rather than among it.
         if profiles.len() > 1 {
             let auto_id = -gid;
             let row = build_auto_row(profiles.len(), connected == auto_id);
@@ -516,8 +520,8 @@ impl ServersPage {
         let index = groups.iter().position(|g| g.id == current).unwrap_or(0);
         *self.groups.borrow_mut() = groups;
 
-        // Наполнение модели двигает выделение; пока это делаем мы, а не
-        // человек, реакция на смену группы не нужна.
+        // Populating the model moves the selection; while we are doing it rather
+        // than the user, no reaction to the group change is needed.
         self.syncing.set(true);
         let previous = self.groups_model.n_items();
         self.groups_model.splice(
@@ -577,7 +581,7 @@ impl ServersPage {
         }
     }
 
-    /// Точечное обновление одной строки по результату теста.
+    /// Targeted update of one row from a test result.
     pub fn update_latency(&self, id: i64, latency: i32) {
         let rows = self.rows.borrow();
         let Some(row) = rows.get(&id) else { return };
@@ -591,7 +595,7 @@ impl ServersPage {
         }
     }
 
-    /// Переносит отметку активного сервера, не перестраивая список.
+    /// Moves the active-server marker without rebuilding the list.
     pub fn refresh_active(&self, connected_id: i64) {
         for (id, row) in self.rows.borrow().iter() {
             if *id == connected_id {
@@ -602,9 +606,9 @@ impl ServersPage {
         }
     }
 
-    /// Отмечает сервер, который автовыбор держит прямо сейчас. Засечку
-    /// показываем на нём, а не на строке «Автовыбор»: человеку важно, через
-    /// какой сервер он на самом деле выходит.
+    /// Marks the server currently held by auto-selection. Show the marker on it,
+    /// not on the “Auto-selection” row: the user needs to know which server is
+    /// actually being used.
     pub fn mark_auto_member(&self, name: &str) {
         let profiles = self
             .state
@@ -619,8 +623,8 @@ impl ServersPage {
             .unwrap_or(0);
 
         for (id, row) in self.rows.borrow().iter() {
-            // Строка автовыбора остаётся отмеченной как активный способ
-            // подключения, а участник получает свою засечку.
+            // The auto-selection row remains marked as the active connection
+            // method, while the member receives its own marker.
             let active = *id == member_id || (*id < 0 && self.state.connected_id() == *id);
             if active {
                 row.content.add_css_class("active");
@@ -663,14 +667,14 @@ fn build_row(profile: &throne_config::Profile, active: bool) -> Row {
         .build();
 
     let address = gtk::Label::builder()
-        .label(&profile.address())
+        .label(profile.address())
         .xalign(0.0)
         .ellipsize(gtk::pango::EllipsizeMode::Middle)
         .css_classes(["meta", "numeric"])
         .build();
 
     let speed = gtk::Label::builder()
-        .label(&speed_label(profile))
+        .label(speed_label(profile))
         .xalign(0.0)
         .visible(!speed_label(profile).is_empty())
         .css_classes(["meta", "numeric", "speed"])
@@ -731,7 +735,7 @@ fn build_row(profile: &throne_config::Profile, active: bool) -> Row {
     }
 }
 
-/// Строка автовыбора: под ней ядро само держит лучший сервер группы.
+/// Auto-selection row: the core keeps the best server in the group beneath it.
 fn build_auto_row(count: usize, active: bool) -> Row {
     let name = gtk::Label::builder()
         .label("Автовыбор")
@@ -746,7 +750,7 @@ fn build_auto_row(count: usize, active: bool) -> Row {
         .build();
 
     let description = gtk::Label::builder()
-        .label(&format!("лучший из {count} по задержке"))
+        .label(format!("лучший из {count} по задержке"))
         .xalign(0.0)
         .css_classes(["meta"])
         .build();
@@ -805,7 +809,7 @@ fn build_auto_row(count: usize, active: bool) -> Row {
     }
 }
 
-/// Что показать о последнем замере скорости: приём, отдача и страна выхода.
+/// What to show about the latest speed measurement: download, upload, and exit country.
 fn speed_label(profile: &throne_config::Profile) -> String {
     let mut parts = Vec::new();
     if !profile.dl_speed.is_empty() {
@@ -820,8 +824,8 @@ fn speed_label(profile: &throne_config::Profile) -> String {
     parts.join("  ")
 }
 
-/// Короткая метка протокола: в строке важна не точная реализация, а то, чем
-/// сервер отличается от соседа.
+/// Short protocol label: the row needs the distinction from neighboring servers,
+/// not the exact implementation.
 fn protocol_label(kind: &str) -> &str {
     match kind {
         "vless" => "VLESS",

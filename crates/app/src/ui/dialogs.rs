@@ -1,4 +1,4 @@
-//! Диалоги: добавление серверов и подписок, импорт из Throne, «О программе».
+//! Dialogs: adding servers and subscriptions, importing from Throne, and “About.”
 
 use std::rc::Rc;
 
@@ -7,19 +7,18 @@ use adw::prelude::*;
 use crate::engine::Command;
 use crate::paths;
 use crate::ui::Window;
-use throne_config::profile::Group;
 use throne_config::link;
+use throne_config::profile::Group;
 
-/// Одно окно на оба способа добавления: вставить ссылки или подписаться.
-/// Разделены заголовками, а не вкладками — выбор очевиден по тому, что у
-/// человека в буфере обмена.
+/// One window for both adding methods: paste links or subscribe.
+/// They are separated by headings rather than tabs; the choice is obvious from
+/// what the user has in the clipboard.
 pub fn add_dialog(window: &Rc<Window>) {
     let dialog = adw::Dialog::builder()
         .title("Добавить серверы")
         .content_width(560)
-        // Высота подобрана так, чтобы обе кнопки — «Добавить» и «Подписаться» —
-        // были видны сразу: иначе второй способ добавления выглядит
-        // отсутствующим.
+        // The height is chosen so both buttons, “Add” and “Subscribe,” are visible
+        // immediately; otherwise the second adding method appears to be missing.
         .content_height(660)
         .build();
 
@@ -27,10 +26,12 @@ pub fn add_dialog(window: &Rc<Window>) {
 
     let page = adw::PreferencesPage::new();
 
-    // ── ссылки ──────────────────────────────────────────────────────────
+    // ── links ──────────────────────────────────────────────────────────
     let links_group = adw::PreferencesGroup::builder()
         .title("Вставить ссылки")
-        .description("По одной в строке: vless://, vmess://, trojan://, ss://, hysteria2://, tuic://")
+        .description(
+            "По одной в строке: vless://, vmess://, trojan://, ss://, hysteria2://, tuic://",
+        )
         .build();
 
     let view = gtk::TextView::builder()
@@ -57,16 +58,14 @@ pub fn add_dialog(window: &Rc<Window>) {
     links_group.add(&add_links);
     page.add(&links_group);
 
-    // ── подписка ────────────────────────────────────────────────────────
+    // ── subscription ────────────────────────────────────────────────────────
     let sub_group = adw::PreferencesGroup::builder()
         .title("Подписка")
         .description("Ссылка на список серверов; обновляется по кнопке в списке")
         .build();
 
     let url_row = adw::EntryRow::builder().title("Адрес подписки").build();
-    let name_row = adw::EntryRow::builder()
-        .title("Название группы")
-        .build();
+    let name_row = adw::EntryRow::builder().title("Название группы").build();
     sub_group.add(&url_row);
     sub_group.add(&name_row);
 
@@ -157,6 +156,13 @@ pub fn add_dialog(window: &Rc<Window>) {
                 gid,
                 url,
                 user_agent: window.state().settings.borrow().sub_user_agent.clone(),
+                send_hwid: window.state().settings.borrow().sub_send_hwid,
+                custom_hwid_params: window
+                    .state()
+                    .settings
+                    .borrow()
+                    .sub_custom_hwid_params
+                    .clone(),
             });
             dialog.close();
             window.toast("Загружаю подписку…");
@@ -166,7 +172,7 @@ pub fn add_dialog(window: &Rc<Window>) {
     dialog.present(Some(&window.root));
 }
 
-/// Обновление текущей подписки.
+/// Update the current subscription.
 pub fn update_subscription(window: &Rc<Window>) {
     let gid = window.state().current_gid.get();
     let group = window.state().store.borrow().group(gid).ok().flatten();
@@ -180,12 +186,19 @@ pub fn update_subscription(window: &Rc<Window>) {
         gid,
         url: group.url,
         user_agent: window.state().settings.borrow().sub_user_agent.clone(),
+        send_hwid: window.state().settings.borrow().sub_send_hwid,
+        custom_hwid_params: window
+            .state()
+            .settings
+            .borrow()
+            .sub_custom_hwid_params
+            .clone(),
     });
     window.toast("Обновляю подписку…");
 }
 
-/// Перенос данных из оригинального Throne. Импорт добавляет группы, а не
-/// заменяет существующие: повторный запуск создаст копии, о чём предупреждаем.
+/// Import data from the original Throne. Import adds groups rather than replacing
+/// existing ones; a second run creates copies, as explained to the user.
 pub fn import_dialog(window: &Rc<Window>) {
     let path = paths::throne_database();
     let dialog = adw::AlertDialog::builder()
@@ -208,12 +221,16 @@ pub fn import_dialog(window: &Rc<Window>) {
             if response != "import" {
                 return;
             }
-            let outcome = window.state().store.borrow_mut().import_throne(&paths::throne_database());
+            let outcome = window
+                .state()
+                .store
+                .borrow_mut()
+                .import_throne(&paths::throne_database());
             match outcome {
                 Ok(done) => {
-                    // Правила импорт кладёт прямо в базу — окну надо их
-                    // перечитать, иначе они не появятся и будут затёрты
-                    // следующим сохранением настроек.
+                    // Import places rules directly in the database; the window must
+                    // reload them or they will not appear and will be overwritten
+                    // by the next settings save.
                     if let Err(e) = window.state().reload_settings() {
                         tracing::warn!("настройки после импорта не перечитаны: {e:#}");
                     }
@@ -223,9 +240,8 @@ pub fn import_dialog(window: &Rc<Window>) {
                         "Перенесено групп: {}, серверов: {}, правил: {}",
                         done.groups, done.profiles, done.rules
                     );
-                    // Про пропущенные молчать нельзя: человек считает, что
-                    // маршрутизация переехала целиком, и не поймёт, почему
-                    // часть трафика идёт не туда.
+                    // Omitted items must be reported: the user would assume routing
+                    // was fully imported and would not understand misplaced traffic.
                     if done.skipped_rules > 0 {
                         text.push_str(&format!(
                             ". Правил не перенеслось: {} — задайте их заново",
@@ -258,7 +274,7 @@ pub fn about(window: &Rc<Window>) {
     about.present(Some(&window.root));
 }
 
-/// Имя хоста из адреса подписки — годится как название группы по умолчанию.
+/// Host name from the subscription address, suitable as the default group name.
 fn host_of(url: &str) -> String {
     url.split("://")
         .nth(1)
@@ -269,7 +285,7 @@ fn host_of(url: &str) -> String {
         .to_string()
 }
 
-/// Проверка конфигурации выбранного сервера без подключения.
+/// Check the selected server configuration without connecting.
 pub fn check_config(window: &Rc<Window>) {
     let Some(profile) = window.state().selected_profile() else {
         window.toast("Сначала выберите сервер");

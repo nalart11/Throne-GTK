@@ -1,36 +1,47 @@
-//! Загрузка и разбор подписок.
+//! Loading and parsing subscriptions.
 //!
-//! Единого формата нет: панели отдают либо base64 от списка ссылок, либо тот же
-//! список открытым текстом, либо Clash-YAML, либо готовый JSON sing-box.
-//! Определяем формат по содержимому, а не по заголовкам — Content-Type у
-//! половины панелей `text/plain` независимо от того, что внутри.
+//! There is no single format: panels provide either base64 of a link list, the same
+//! list as plain text, Clash YAML, or ready-made sing-box JSON.
+//! We determine the format from the content rather than headers; Content-Type for
+//! half of panels is `text/plain` regardless of what is inside.
 
 use anyhow::{bail, Context, Result};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::link;
 use crate::profile::Profile;
 
-/// Результат разбора: что удалось прочитать и на чём споткнулись.
+/// Parsing result: what was read successfully and what failed.
 #[derive(Debug, Default)]
 pub struct Parsed {
     pub profiles: Vec<Profile>,
     pub errors: Vec<String>,
-    /// Строка вида `упаковано 12 ГиБ из 100 ГиБ, до 2027-02-03` из заголовка
-    /// `subscription-userinfo`, если панель его прислала.
+    /// A string such as `packed 12 GiB of 100 GiB, until 2027-02-03` from the
+    /// `subscription-userinfo` header, if the panel sent it.
     pub info: String,
 }
 
-/// Скачивает тело подписки. Возвращает вместе с ним содержимое заголовка
-/// `subscription-userinfo` — трафик и срок, которые панели кладут только туда.
-pub async fn fetch(url: &str, user_agent: &str, timeout_secs: u64) -> Result<(String, String)> {
+/// Downloads the subscription body. Returns it together with the contents of the
+/// `subscription-userinfo` header, where panels store traffic and expiry information.
+pub async fn fetch(
+    url: &str,
+    user_agent: &str,
+    timeout_secs: u64,
+    send_hwid: bool,
+    custom_hwid_params: &str,
+) -> Result<(String, String)> {
     let client = reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(Duration::from_secs(timeout_secs))
         .build()?;
-    let resp = client
-        .get(url)
+    let mut request = client.get(url);
+    if send_hwid {
+        request = request.headers(hwid_headers(custom_hwid_params)?);
+    }
+    let resp = request
         .send()
         .await
         .with_context(|| format!("запрос к {url}"))?;
@@ -49,29 +60,136 @@ pub async fn fetch(url: &str, user_agent: &str, timeout_secs: u64) -> Result<(St
     Ok((body, userinfo))
 }
 
-/// Разбирает тело подписки в любом из известных форматов.
+/// Headers used by subscription servers to identify the device.  Custom values
+/// are merged with the platform values, so an omitted custom key keeps the
+/// automatic value.
+pub fn hwid_headers(custom_params: &str) -> Result<HeaderMap> {
+    let mut values = automatic_hwid();
+    if !custom_params.is_empty() {
+        for (key, value) in parse_custom_hwid_params(custom_params)? {
+            values.insert(key, value);
+        }
+    }
+
+    let mut headers = HeaderMap::new();
+    for (key, header_name) in [
+        ("hwid", "x-hwid"),
+        ("os", "x-device-os"),
+        ("osversion", "x-ver-os"),
+        ("model", "x-device-model"),
+    ] {
+        if let Some(value) = values.get(key).filter(|value| !value.is_empty()) {
+            headers.insert(
+                HeaderName::from_static(header_name),
+                HeaderValue::from_str(value)?,
+            );
+        }
+    }
+    Ok(headers)
+}
+
+fn parse_custom_hwid_params(params: &str) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for item in params.split(',') {
+        let Some((key, value)) = item.split_once('=') else {
+            continue;
+        };
+        let key = key.to_ascii_lowercase();
+        if !matches!(key.as_str(), "hwid" | "os" | "osversion" | "model")
+            || key.is_empty()
+            || value.is_empty()
+            || value.contains(['\r', '\n'])
+            || value.chars().count() >= 1000
+        {
+            continue;
+        }
+        result.insert(key, value.to_string());
+    }
+    Ok(result)
+}
+
+fn automatic_hwid() -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    values.insert("hwid".into(), machine_id());
+    values.insert("os".into(), device_os());
+    values.insert("osversion".into(), os_version());
+    values.insert("model".into(), device_model());
+    values
+}
+
+#[cfg(target_os = "linux")]
+fn machine_id() -> String {
+    std::fs::read_to_string("/etc/machine-id")
+        .or_else(|_| std::fs::read_to_string("/var/lib/dbus/machine-id"))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn machine_id() -> String {
+    String::new()
+}
+
+#[cfg(target_os = "linux")]
+fn device_os() -> String {
+    "Linux".into()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn device_os() -> String {
+    std::env::consts::OS.into()
+}
+
+#[cfg(target_os = "linux")]
+fn os_version() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn os_version() -> String {
+    String::new()
+}
+
+#[cfg(target_os = "linux")]
+fn device_model() -> String {
+    std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn device_model() -> String {
+    String::new()
+}
+
+/// Parses a subscription body in any known format.
 pub fn parse(body: &str) -> Result<Parsed> {
     let text = body.trim();
     if text.is_empty() {
         bail!("подписка пуста");
     }
 
-    // JSON: либо массив outbound-ов, либо конфиг sing-box целиком.
+    // JSON: either an array of outbounds or a complete sing-box configuration.
     if text.starts_with('{') || text.starts_with('[') {
         if let Ok(v) = serde_json::from_str::<Value>(text) {
             return Ok(parse_json(&v));
         }
     }
 
-    // Clash: ищем ключ верхнего уровня, а не просто наличие двоеточия —
-    // base64 без паддинга тоже бывает похож на YAML.
+    // Clash: look for a top-level key rather than merely a colon;
+    // unpadded base64 can also resemble YAML.
     if text.contains("proxies:") {
         if let Ok(parsed) = parse_clash(text) {
             return Ok(parsed);
         }
     }
 
-    // Список ссылок: как есть или в base64.
+    // Link list: plain or base64-encoded.
     if let Some(decoded) = try_decode_body(text) {
         let (profiles, errors) = link::parse_many(&decoded);
         if !profiles.is_empty() {
@@ -102,7 +220,7 @@ pub fn parse(body: &str) -> Result<Parsed> {
 }
 
 fn try_decode_body(text: &str) -> Option<String> {
-    // Тело в base64 не содержит `://` — по этому и отличаем его от списка ссылок.
+    // A base64 body does not contain `://`, which distinguishes it from a link list.
     if text.contains("://") {
         return None;
     }
@@ -124,9 +242,12 @@ fn parse_json(v: &Value) -> Parsed {
 
     let mut out = Parsed::default();
     for ob in outbounds {
-        // Служебные outbound-ы конфига — не серверы.
+        // Service outbounds in a configuration are not servers.
         let kind = ob.get("type").and_then(Value::as_str).unwrap_or("");
-        if matches!(kind, "direct" | "block" | "dns" | "selector" | "urltest" | "") {
+        if matches!(
+            kind,
+            "direct" | "block" | "dns" | "selector" | "urltest" | ""
+        ) {
             continue;
         }
         match Profile::from_outbound(ob) {
@@ -137,8 +258,8 @@ fn parse_json(v: &Value) -> Parsed {
     out
 }
 
-/// Clash-конфиг. Переводим каждый `proxies[]` в ссылку и отдаём общему парсеру:
-/// поля там те же, что в ссылках, только разложены по ключам.
+/// Clash configuration. Convert each `proxies[]` entry to a link and pass it to the shared parser:
+/// the fields are the same as in links, only distributed across keys.
 fn parse_clash(text: &str) -> Result<Parsed> {
     let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).context("разбор YAML")?;
     let proxies = doc
@@ -184,8 +305,7 @@ fn yn(v: &serde_yaml_ng::Value, key: &str) -> Option<u64> {
 }
 
 fn yb(v: &serde_yaml_ng::Value, key: &str) -> bool {
-    matches!(v.get(key), Some(serde_yaml_ng::Value::Bool(true)))
-        || ys(v, key) == "true"
+    matches!(v.get(key), Some(serde_yaml_ng::Value::Bool(true))) || ys(v, key) == "true"
 }
 
 fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
@@ -193,7 +313,11 @@ fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
 
     let kind = ys(p, "type");
     let server = ys(p, "server");
-    let port = yn(p, "port").unwrap_or(0) as u16;
+    let port = match yn(p, "port") {
+        Some(n) if n <= u16::MAX as u64 => n as u16,
+        Some(_) => bail!("порт за пределами диапазона"),
+        None => 0,
+    };
     if server.is_empty() || port == 0 {
         bail!("нет адреса сервера");
     }
@@ -352,8 +476,8 @@ fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
     Profile::from_outbound(Value::Object(o))
 }
 
-/// Разбирает заголовок `subscription-userinfo` в человекочитаемую строку.
-/// Формат: `upload=0; download=1234; total=5678; expire=1700000000`.
+/// Parses the `subscription-userinfo` header into a human-readable string.
+/// Format: `upload=0; download=1234; total=5678; expire=1700000000`.
 pub fn format_userinfo(header: &str) -> String {
     let mut used = 0u64;
     let mut total = 0u64;
@@ -397,7 +521,7 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// Дата в ISO без внешних зависимостей: алгоритм Хиннанта (civil_from_days).
+/// ISO date without external dependencies: Hinnant's algorithm (civil_from_days).
 fn format_date(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
     let z = days + 719_468;
@@ -479,9 +603,28 @@ proxies:
 
     #[test]
     fn userinfo_header_is_humanised() {
-        let s = format_userinfo("upload=1073741824; download=1073741824; total=107374182400; expire=1801607400");
+        let s = format_userinfo(
+            "upload=1073741824; download=1073741824; total=107374182400; expire=1801607400",
+        );
         assert!(s.starts_with("2.0 ГиБ из 100.0 ГиБ"), "{s}");
         assert!(s.contains("до 2027-"), "{s}");
+    }
+
+    #[test]
+    fn custom_hwid_params_override_automatic_values() {
+        let headers = hwid_headers("HWID=custom,os=Android,osVersion=13,model=Phone").unwrap();
+        assert_eq!(headers["x-hwid"], "custom");
+        assert_eq!(headers["x-device-os"], "Android");
+        assert_eq!(headers["x-ver-os"], "13");
+        assert_eq!(headers["x-device-model"], "Phone");
+    }
+
+    #[test]
+    fn custom_hwid_params_ignore_invalid_values() {
+        for params in ["unknown=value", "hwid=", "hwid=a\n", "hwid=a,bad"] {
+            assert!(hwid_headers(params).is_ok(), "rejected {params:?}");
+        }
+        assert!(hwid_headers(&format!("hwid={}", "x".repeat(1000))).is_ok());
     }
 
     #[test]

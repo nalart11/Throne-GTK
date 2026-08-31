@@ -42,6 +42,11 @@ sing-box начинает работать без изменений в коде
 
 Нужны: Rust, Go, protoc, GTK4 ≥ 4.12, libadwaita ≥ 1.5.
 
+Ядро собирается Go 1.26: в Go 1.27 линковка падает на `//go:linkname`-хаках
+sing-box и sing-trusttunnel к внутренностям `golang.org/x/net/http2` (нужный
+символ теперь инлайнится). `just build` выставляет `GOTOOLCHAIN=go1.26.0` сам,
+тулчейн 1.26 докачивается автоматически.
+
 ```sh
 just build          # ядро и интерфейс
 just run            # отладочный запуск
@@ -52,7 +57,7 @@ just test           # тесты
 
 ```sh
 cd core/gen && protoc -I . --go_out=. --go-grpc_out=. libcore.proto && cd ../..
-cd core && CGO_ENABLED=1 go build -o ../build/throne-gtk-core -trimpath \
+cd core && GOTOOLCHAIN=go1.26.0 CGO_ENABLED=1 go build -o ../build/throne-gtk-core -trimpath \
     -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,badlinkname,tfogo_checklinkname0" \
     -ldflags "-w -s -checklinkname=0" && cd ..
 cargo build --release -p throne-app && cp target/release/throne-gtk build/
@@ -74,10 +79,12 @@ just install        # или ./scripts/install.sh
 TUN-интерфейс требует прав. Один раз:
 
 ```sh
-just grant-tun      # setcap cap_net_admin,cap_net_raw+ep build/throne-gtk-core
+just grant-tun      # setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep для ядра
 ```
 
-Без этого режим VPN откажется включаться и скажет, какую команду выполнить.
+Права живут на файле ядра, а `just install` создаёт его заново, поэтому после
+переустановки `grant-tun` нужно повторять. Без прав режим VPN откажется
+включаться и скажет, какую команду выполнить.
 Режим «Прокси» прав не требует.
 
 ## Данные

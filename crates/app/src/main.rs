@@ -1,4 +1,4 @@
-//! Throne GTK — клиент прокси на sing-box и Xray с интерфейсом на GTK4.
+//! Throne GTK — a proxy client for sing-box and Xray with a GTK4 interface.
 
 mod engine;
 mod format;
@@ -24,8 +24,8 @@ use throne_store::Store;
 const APP_ID: &str = "dev.nalart.ThroneGtk";
 
 fn main() -> glib::ExitCode {
-    // Канал событий заводим до подписчика логов: строки, записанные при
-    // старте, должны попасть в журнал окна, а не в никуда.
+    // Create the event channel before the log subscriber: lines written during
+    // startup must reach the window log rather than disappear.
     let (events_tx, events_rx) = async_channel::unbounded::<engine::Event>();
 
     tracing_subscriber::registry()
@@ -34,8 +34,8 @@ fn main() -> glib::ExitCode {
         .with(logbridge::LogBridge::new(events_tx.clone()))
         .init();
 
-    // Значок в трее заводим до окна: он живёт в своём потоке и к моменту
-    // первого закрытия окна уже успевает зарегистрироваться в панели.
+    // Create the tray icon before the window: it lives in its own thread and
+    // has time to register with the panel before the first window close.
     let (actions_tx, actions_rx) = async_channel::unbounded::<tray::Action>();
     let tray = tray::start(actions_tx);
 
@@ -51,10 +51,10 @@ fn main() -> glib::ExitCode {
         let actions_rx = actions_rx.clone();
         let tray = tray.clone();
         move |app| {
-            // Второй вызов activate (запуск из списка программ при уже
-            // работающей программе) не должен поднимать второе окно и второе
-            // ядро. Окно ищем среди всех, а не только активных: спрятанное в
-            // трей окно активным не считается.
+            // A second activate call (launching from the application list while
+            // the program is already running) must not create a second window
+            // and a second core. Search among all windows, not just active ones:
+            // a window hidden in the tray is not considered active.
             if let Some(window) = app.windows().first() {
                 window.set_visible(true);
                 window.present();
@@ -76,8 +76,8 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
-/// Выключение целиком. Ядро завершаем сами, не полагаясь на то, что оно
-/// заметит смерть родителя: иначе TUN-интерфейс переживёт закрытие программы.
+/// Shut down completely. Terminate the core ourselves instead of relying on it
+/// to notice its parent’s death: otherwise the TUN interface outlives the app.
 fn shutdown(state: &Rc<State>) {
     let _ = state.save_settings();
     state.engine.send(Command::Shutdown);
@@ -104,14 +104,14 @@ fn build(
         tracing::error!("ядро не найдено: {}", core_bin.display());
     }
 
-    // Единственный потребитель событий: интерфейс обновляется только здесь.
+    // The only event consumer: the interface is updated only here.
     glib::spawn_future_local({
         let window = window.clone();
         let tray = tray.clone();
         async move {
             while let Ok(event) = events_rx.recv().await {
-                // Значок показывает состояние в подсказке: со спрятанным окном
-                // это единственный способ увидеть, работает ли соединение.
+                // The icon shows the state in its tooltip: with the window hidden,
+                // this is the only way to see whether the connection is working.
                 if let engine::Event::Status(status) = &event {
                     tray.set_connected(match status {
                         Status::Connected { name, .. } => Some(name.clone()),
@@ -123,7 +123,7 @@ fn build(
         }
     });
 
-    // Щелчки по значку приходят из его потока сюда.
+    // Clicks on the icon arrive here from its thread.
     glib::spawn_future_local({
         let window = window.clone();
         let state = state.clone();
@@ -148,8 +148,8 @@ fn build(
         let state = state.clone();
         let tray = tray.clone();
         move |window| {
-            // Значок на месте — прячемся в него: соединение продолжает
-            // работать, окно возвращается щелчком по значку.
+            // The icon is available, so hide the window in it: the connection
+            // keeps working, and a click on the icon restores the window.
             if state.settings.borrow().close_to_tray && tray.is_alive() {
                 let _ = state.save_settings();
                 window.set_visible(false);
@@ -160,16 +160,15 @@ fn build(
         }
     });
 
-    // Автовыбор — тоже «прошлый выбор», хотя профиля за ним не стоит.
-    let has_selection =
-        state.selected_profile().is_some() || state.auto_selected().is_some();
+    // Auto-selection is also a “previous selection,” even though it has no profile.
+    let has_selection = state.selected_profile().is_some() || state.auto_selected().is_some();
     if state.settings.borrow().connect_last_on_start && has_selection {
         state.connect_selected();
     }
 
-    // Первый запуск при уже установленном Throne: предлагаем перенести
-    // серверы сразу, а не оставляем человека перед пустым списком с меню,
-    // в которое ещё надо догадаться заглянуть.
+    // On the first run with Throne already installed, offer to import servers
+    // immediately instead of leaving the user with an empty list and a menu
+    // they would first have to think to open.
     let empty = state
         .store
         .borrow()
@@ -185,9 +184,9 @@ fn build(
             let window = window.clone();
             let tray = tray.clone();
             async move {
-                // Значок регистрируется в панели не мгновенно. «Свёрнутым»
-                // значит «в значок», поэтому без значка окно всё же надо
-                // показать — иначе программу неоткуда достать.
+                // The icon does not register with the panel immediately. “Hidden”
+                // means “in the icon,” so without an icon the window must still
+                // be shown — otherwise there would be no way to access the app.
                 glib::timeout_future(std::time::Duration::from_millis(1500)).await;
                 if !tray.is_alive() {
                     window.root.present();
@@ -248,8 +247,8 @@ fn register_actions(app: &adw::Application, window: &Rc<ui::Window>) {
     quit.connect_activate({
         let app = app.clone();
         let window = window.clone();
-        // Выход по Ctrl+Q не проходит через закрытие окна, так что ядро надо
-        // погасить здесь же — иначе туннель переживёт программу.
+        // Ctrl+Q does not go through window closing, so stop the core here too
+        // — otherwise the tunnel outlives the app.
         move |_, _| {
             shutdown(window.state());
             app.quit()
@@ -258,7 +257,7 @@ fn register_actions(app: &adw::Application, window: &Rc<ui::Window>) {
     app.add_action(&quit);
     app.set_accels_for_action("app.quit", &["<Control>q"]);
 
-    // Кнопки на странице серверов делают то же, что пункты меню.
+    // Buttons on the servers page do the same as the menu items.
     window.servers_page().test_button().connect_clicked({
         let window = window.clone();
         move |_| window.start_test()
@@ -282,10 +281,9 @@ fn load_styles() {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
-    // Форма кнопок идёт выше пользовательской темы: та задаёт капсулы всем
-    // подряд, а сетка этого окна держится на прямоугольниках. Всё остальное
-    // оформление тема по-прежнему перекрывает — этот провайдер трогает только
-    // скругления.
+    // Button shapes take precedence over the user theme: it makes everything
+    // into capsules, while this window’s grid relies on rectangles. The theme
+    // still controls all other styling — this provider only affects rounding.
     let shape = gtk::CssProvider::new();
     shape.load_from_string(include_str!("../resources/shape.css"));
     gtk::style_context_add_provider_for_display(
@@ -295,8 +293,8 @@ fn load_styles() {
     );
 }
 
-/// Если не поднялось даже хранилище, показать окно с причиной: молчаливый
-/// выход не оставляет человеку ничего, кроме пустого экрана.
+/// If even the storage could not be initialized, show a window explaining why:
+/// silently exiting leaves the user with nothing but an empty screen.
 fn show_fatal(app: &adw::Application, message: &str) {
     let dialog = adw::AlertDialog::builder()
         .heading("Не удалось запустить Throne GTK")

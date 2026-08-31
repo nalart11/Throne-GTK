@@ -1,10 +1,10 @@
-/* Форма кнопок.
+/* Button shapes.
  *
- * Отдельный файл, потому что грузится он с приоритетом выше пользовательского:
- * тема рабочего стола вправе решать почти всё, но не форму кнопок в этом окне.
- * Темы вроде adw-gtk3 задают `.text-button { border-radius: 999px }`, и тогда
- * переключатель режима и кнопки в шапке расплываются в капсулы, а сетка окна
- * держится на прямоугольниках.
+ * Separate file because it loads with higher priority than the user theme:
+ * the desktop theme may decide almost everything except button shapes in this window.
+ * Themes such as adw-gtk3 set `.text-button { border-radius: 999px }`, causing
+ * the mode switch and header buttons to become capsules while the window grid
+ * relies on rectangles.
  */
 
 button,
@@ -24,15 +24,15 @@ menubutton > button {
   border-radius: 6px;
 }
 
-/* Круглые по замыслу — закрытие окна, кнопки-иконки в шапке — такими и
-   остаются: их форма несёт смысл, а не украшает. */
+/* Intentionally round elements — window close and header icon buttons — remain
+   that way: their shape carries meaning rather than decoration. */
 button.circular,
 button.circular.image-button {
   border-radius: 999px;
 }
 
-/* Связанная пара «Прокси | VPN»: скруглены только внешние углы, иначе группа
-   распадается на две отдельные кнопки. */
+/* Linked “Proxy | VPN” pair: only the outer corners are rounded, otherwise the group
+   falls apart into two separate buttons. */
 .linked > button:first-child {
   border-radius: 6px 0 0 6px;
 }
@@ -45,8 +45,8 @@ button.circular.image-button {
   border-radius: 0;
 }
 
-/* Кнопка подключения остаётся капсулой: она единственный по-настоящему
-   выделенный элемент экрана, и форма — часть этого выделения. */
+/* The connection button remains a capsule: it is the only truly highlighted
+   element on screen, and its shape is part of that emphasis. */
 button.connect {
   border-radius: 999px;
 }

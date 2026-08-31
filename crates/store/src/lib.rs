@@ -1,8 +1,8 @@
-//! Хранилище: группы, профили и настройки в SQLite.
+//! Storage: groups, profiles, and settings in SQLite.
 //!
-//! База своя (`~/.config/throne-gtk/`), а не общая с оригинальным Throne:
-//! две программы, пишущие в один файл, рано или поздно затрут друг другу
-//! правки. Данные из Throne переносятся разовым импортом — см. [`Store::import_throne`].
+//! A separate database (`~/.config/throne-gtk/`), rather than one shared with the
+//! original Throne: two programs writing to one file will eventually overwrite
+//! each other's changes. Data from Throne is moved by a one-time import — see [`Store::import_throne`].
 
 use std::path::Path;
 
@@ -65,8 +65,8 @@ impl Store {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("создание каталога {}", dir.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("открытие базы {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("открытие базы {}", path.display()))?;
         Self::init(conn)
     }
 
@@ -75,8 +75,8 @@ impl Store {
     }
 
     fn init(conn: Connection) -> Result<Self> {
-        // WAL переживает падение процесса без потери последней транзакции,
-        // foreign_keys нужен, чтобы удаление группы уносило её профили.
+        // WAL survives a process crash without losing the last transaction;
+        // foreign_keys is needed so deleting a group also deletes its profiles.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
@@ -85,8 +85,8 @@ impl Store {
         Ok(store)
     }
 
-    /// Группа с id 1 существует всегда: в неё попадают профили, добавленные
-    /// вручную, и ей же владеет импорт, если у исходных данных группы не было.
+    /// The group with ID 1 always exists: manually added profiles go into it,
+    /// and the import uses it when the source data has no group.
     fn ensure_default_group(&self) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO groups (id, name) VALUES (1, 'Мои серверы')",
@@ -95,7 +95,7 @@ impl Store {
         Ok(())
     }
 
-    // ── группы ──────────────────────────────────────────────────────────
+    // ── groups ──────────────────────────────────────────────────────────
 
     pub fn groups(&self) -> Result<Vec<Group>> {
         let mut stmt = self.conn.prepare(
@@ -155,17 +155,18 @@ impl Store {
         Ok(())
     }
 
-    /// Удаляет группу вместе с её профилями. Группу по умолчанию не трогает —
-    /// иначе новым профилям некуда будет попасть.
+    /// Deletes a group together with its profiles. Leaves the default group alone;
+    /// otherwise new profiles would have nowhere to go.
     pub fn delete_group(&self, id: i64) -> Result<()> {
         if id == 1 {
             anyhow::bail!("группу по умолчанию удалить нельзя");
         }
-        self.conn.execute("DELETE FROM groups WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM groups WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    // ── профили ─────────────────────────────────────────────────────────
+    // ── profiles ─────────────────────────────────────────────────────────
 
     pub fn profiles(&self, gid: Option<i64>) -> Result<Vec<Profile>> {
         let (sql, params) = match gid {
@@ -184,7 +185,9 @@ impl Store {
         };
         let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt
-            .query_map(rusqlite::params_from_iter(params), |r| Ok(row_to_profile(r)))?
+            .query_map(rusqlite::params_from_iter(params), |r| {
+                Ok(row_to_profile(r))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -249,8 +252,8 @@ impl Store {
         Ok(())
     }
 
-    /// Записывает только результат теста — вызывается пачками после прогона и
-    /// не трогает поля, которые пользователь мог править параллельно.
+    /// Stores only the test result — called in batches after a run and does not
+    /// touch fields that the user may have edited concurrently.
     pub fn set_latency(&self, id: i64, latency: i32, at: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE profiles SET latency = ?2, latency_at = ?3 WHERE id = ?1",
@@ -259,8 +262,8 @@ impl Store {
         Ok(())
     }
 
-    /// Результат замера скорости. Пустая строка — «не мерили»; сохраняем как
-    /// есть, чтобы не путать с нулевой скоростью.
+    /// Speed measurement result. An empty string means “not measured”; preserve it
+    /// as is so it is not confused with zero speed.
     pub fn set_speed(&self, id: i64, dl: &str, ul: &str, country: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE profiles SET dl_speed = ?2, ul_speed = ?3, test_country = ?4 WHERE id = ?1",
@@ -279,7 +282,8 @@ impl Store {
     }
 
     pub fn delete_profile(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM profiles WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM profiles WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -292,12 +296,12 @@ impl Store {
         Ok(())
     }
 
-    /// Заменяет содержимое группы результатом обновления подписки.
+    /// Replaces the contents of a group with the result of a subscription update.
     ///
-    /// Совпавшие по «отпечатку» серверы сохраняют накопленные задержку и
-    /// трафик: подписки переприсылают тот же список каждые несколько часов, и
-    /// без этого история тестов обнулялась бы при каждом обновлении.
-    /// Возвращает (добавлено, сохранено, удалено).
+    /// Servers matching by “fingerprint” retain their accumulated latency and
+    /// traffic: subscriptions resend the same list every few hours, and without
+    /// this, test history would be reset on every update.
+    /// Returns (added, kept, removed).
     pub fn replace_group_profiles(
         &mut self,
         gid: i64,
@@ -310,7 +314,9 @@ impl Store {
         tx.execute("DELETE FROM profiles WHERE gid = ?1", [gid])?;
 
         for (order, profile) in incoming.iter().enumerate() {
-            let previous = existing.iter().find(|old| fingerprint(old) == fingerprint(profile));
+            let previous = existing
+                .iter()
+                .find(|old| fingerprint(old) == fingerprint(profile));
             if previous.is_some() {
                 kept += 1;
             }
@@ -345,16 +351,14 @@ impl Store {
         ))
     }
 
-    // ── настройки ───────────────────────────────────────────────────────
+    // ── settings ───────────────────────────────────────────────────────
 
-    /// Настройки лежат по ключу на поле: так добавление нового поля не требует
-    /// миграции, а неизвестные ключи от будущих версий не мешают старым.
+    /// Settings are stored under one key per field: adding a new field therefore
+    /// requires no migration, and unknown keys from future versions do not bother old ones.
     pub fn settings(&self) -> Result<Settings> {
         let mut stmt = self.conn.prepare("SELECT key, value FROM settings")?;
         let mut map = serde_json::Map::new();
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (key, raw) = row?;
             let value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
@@ -379,11 +383,11 @@ impl Store {
         Ok(())
     }
 
-    // ── импорт из оригинального Throne ──────────────────────────────────
+    // ── import from the original Throne ──────────────────────────────────
 
-    /// Переносит группы, профили и правила маршрутизации из базы Throne.
+    /// Imports groups, profiles, and routing rules from the Throne database.
     ///
-    /// Возвращает счётчики перенесённого — см. [`ImportOutcome`].
+    /// Returns counts of imported items — see [`ImportOutcome`].
     pub fn import_throne(&mut self, throne_db: &Path) -> Result<ImportOutcome> {
         let src = open_throne(throne_db)?;
 
@@ -410,14 +414,14 @@ impl Store {
         let mut profile_count = 0;
 
         for (old_id, name, url, info, archive, skip, last_update) in incoming_groups {
-            // Throne хранит заголовок подписки как есть; показывать
-            // `upload=0; download=0; expire=...` человеку незачем.
+            // Throne stores the subscription header as is; there is no reason to
+            // show `upload=0; download=0; expire=...` to the user.
             let info = match info.contains('=') {
                 true => throne_config::subscription::format_userinfo(&info),
                 false => info,
             };
             let new_gid = if old_id == 1 {
-                // Первая группа Throne — та же «по умолчанию», отдельной копии не нужно.
+                // Throne's first group is the same default group; no separate copy is needed.
                 1
             } else {
                 self.insert_group(&Group {
@@ -447,8 +451,7 @@ impl Store {
                     ul_speed: r.get(4)?,
                     test_country: r.get(5)?,
                     ip_out: r.get(6)?,
-                    outbound: serde_json::from_str(&r.get::<_, String>(7)?)
-                        .unwrap_or(Value::Null),
+                    outbound: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or(Value::Null),
                     traffic_dl: r.get(8)?,
                     traffic_up: r.get(9)?,
                     latency_at: r.get(10)?,
@@ -459,8 +462,8 @@ impl Store {
 
             for profile in rows {
                 let profile = profile?;
-                // Профиль без разбираемого outbound-а бесполезен: он не соберётся
-                // в конфиг и будет молча падать при подключении.
+                // A profile without a parseable outbound is useless: it cannot be
+                // assembled into a configuration and will fail silently on connection.
                 if !profile.outbound.is_object() {
                     tracing::warn!("пропускаю профиль `{}`: битый outbound", profile.name);
                     continue;
@@ -480,32 +483,32 @@ impl Store {
         })
     }
 
-    /// Переносит одни правила маршрутизации. Серверы к этому моменту обычно
-    /// уже на месте, а полный импорт добавил бы к ним вторые копии групп.
+    /// Imports only the routing rules. The servers are usually already in place by
+    /// this point, and a full import would add duplicate copies of their groups.
     ///
-    /// Возвращает (перенесено правил, пропущено правил Throne).
+    /// Returns (imported rules, skipped Throne rules).
     pub fn import_throne_routes(&mut self, throne_db: &Path) -> Result<(usize, usize)> {
         let src = open_throne(throne_db)?;
         self.import_route_rules(&src)
     }
 
-    /// Правила маршрутизации активного профиля Throne.
+    /// Routing rules of the active Throne profile.
     ///
-    /// Правило переносится целиком, со всеми условиями, и получает режим
-    /// «подошло любое». В Throne такое правило означало бы «домен или подсеть,
-    /// и при этом готовый список» — «и» в нём отменяет часть перечисленного
-    /// молча, а пишут смешанное правило как список исключений.
+    /// The rule is imported in full, with all conditions, and receives the
+    /// “any match” mode. In Throne, such a rule would mean “domain or subnet,
+    /// and also a ready-made list” — the “and” silently cancels part of the list,
+    /// while mixed rules are written as a list of exceptions.
     ///
-    /// Возвращает (перенесено правил, пропущено правил Throne).
+    /// Returns (imported rules, skipped Throne rules).
     fn import_route_rules(&mut self, src: &Connection) -> Result<(usize, usize)> {
-        // Правила появились не в первой версии Throne: база, собранная до них,
-        // импортируется как раньше — по группам и профилям.
+        // Rules were not present in the first version of Throne: a database created
+        // before them is imported as before — by groups and profiles.
         if !table_exists(src, "route_rules")? {
             return Ok((0, 0));
         }
 
-        // Профилей маршрутизации в Throne может быть несколько; работает тот,
-        // что выбран в интерфейсе.
+        // Throne may have several routing profiles; the one selected in the
+        // interface is used.
         let active: i64 = match table_exists(src, "settings")? {
             true => src
                 .query_row(
@@ -516,8 +519,8 @@ impl Store {
                 .optional()?,
             false => None,
         }
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(1);
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(1);
 
         let mut stmt = src.prepare(
             "SELECT COALESCE(name,''), domain_json, domain_suffix_json, domain_keyword_json,
@@ -547,12 +550,15 @@ impl Store {
                         (MatchKind::Process, json_values(r.get(8)?)),
                         (MatchKind::RuleSet, json_values(r.get(9)?)),
                     ],
-                    // Условия, которых у нас нет. Правило с таким условием
-                    // перенести нельзя: без него оно поймает лишнее.
+                    // Conditions that we do not support. A rule with such a
+                    // condition cannot be imported: without it, it would catch too much.
                     unsupported: [
-                        r.get::<_, Option<String>>(10)?.is_some_and(|v| !v.trim().is_empty()),
-                        r.get::<_, Option<String>>(11)?.is_some_and(|v| !v.trim().is_empty()),
-                        r.get::<_, Option<String>>(12)?.is_some_and(|v| !v.trim().is_empty()),
+                        r.get::<_, Option<String>>(10)?
+                            .is_some_and(|v| !v.trim().is_empty()),
+                        r.get::<_, Option<String>>(11)?
+                            .is_some_and(|v| !v.trim().is_empty()),
+                        r.get::<_, Option<String>>(12)?
+                            .is_some_and(|v| !v.trim().is_empty()),
                         !json_values(r.get(13)?).is_empty(),
                         !json_values(r.get(14)?).is_empty(),
                         !json_values(r.get(15)?).is_empty(),
@@ -585,8 +591,8 @@ impl Store {
         if imported.is_empty() {
             return Ok((0, skipped));
         }
-        // Импорт добавляет, а не заменяет: свои правила пользователь уже мог
-        // завести, и они идут первыми.
+        // Import adds rather than replaces: the user may already have created
+        // their own rules, and those come first.
         let count = imported.len();
         let mut settings = self.settings()?;
         settings.route_rules.extend(imported);
@@ -595,18 +601,18 @@ impl Store {
     }
 }
 
-/// Счётчики переноса из Throne.
+/// Counts of items imported from Throne.
 pub struct ImportOutcome {
     pub groups: usize,
     pub profiles: usize,
     pub rules: usize,
-    /// Правила Throne, оставшиеся непереносимыми: служебные (перехват DNS его
-    /// ядро ставит само), цепочки на конкретный сервер и условия, которых нет
-    /// в нашей модели, — по источнику соединения, по сети, с инверсией.
+    /// Throne rules that could not be imported: special rules (its core sets up
+    /// DNS interception itself), chains to a specific server, and conditions not
+    /// supported by our model — by connection source, by network, or inverted.
     pub skipped_rules: usize,
 }
 
-/// Правило маршрутизации в том виде, в каком его хранит Throne.
+/// A routing rule in the form in which Throne stores it.
 struct ThroneRule {
     name: String,
     conditions: [(MatchKind, Vec<String>); 8],
@@ -616,7 +622,7 @@ struct ThroneRule {
 }
 
 impl ThroneRule {
-    /// Правило Throne в нашей модели. `None` — правило не переносится.
+    /// Converts a Throne rule to our model. `None` means the rule is not imported.
     fn to_route_rule(&self) -> Option<RouteRule> {
         if self.unsupported {
             return None;
@@ -640,14 +646,14 @@ impl ThroneRule {
         })
     }
 
-    /// Куда правило отправляет трафик. `None` — направление, которого у нас
-    /// нет: перехват DNS, цепочка через конкретный сервер, сортировка sniff.
+    /// Where the rule sends traffic. `None` means a destination we do not support:
+    /// DNS interception, a chain through a specific server, or sniff sorting.
     fn route_action(&self) -> Option<RouteAction> {
         match self.action.as_str() {
             "reject" => Some(RouteAction::Block),
-            // Throne держит направление в отдельном поле, а `action` у него
-            // остаётся "route": -1 прокси, -2 напрямую, -3 блок, -4 перехват
-            // DNS. Значение от нуля и выше — цепочка на конкретный профиль.
+            // Throne keeps the destination in a separate field, while its `action`
+            // remains "route": -1 proxy, -2 direct, -3 block, -4 DNS interception.
+            // A value of zero or higher is a chain to a specific profile.
             "route" => match self.outbound_id {
                 -1 => Some(RouteAction::Proxy),
                 -2 => Some(RouteAction::Direct),
@@ -659,8 +665,8 @@ impl ThroneRule {
     }
 }
 
-/// База Throne открывается только на чтение: оригинал должен пережить импорт
-/// нетронутым, даже если он запущен прямо сейчас.
+/// The Throne database is opened read-only: the original must remain untouched
+/// by the import, even if it is currently running.
 fn open_throne(path: &Path) -> Result<Connection> {
     if !path.exists() {
         anyhow::bail!("файл {} не найден", path.display());
@@ -683,7 +689,7 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
     Ok(found.is_some())
 }
 
-/// Значения условия: Throne держит их JSON-массивом строк или чисел.
+/// Condition values: Throne stores them as a JSON array of strings or numbers.
 fn json_values(raw: Option<String>) -> Vec<String> {
     let Some(raw) = raw else {
         return Vec::new();
@@ -702,8 +708,8 @@ fn json_values(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
-/// Отпечаток сервера без имени и тега: подписки переименовывают серверы
-/// (счётчики трафика, даты в названии), но адрес и ключи остаются теми же.
+/// Server fingerprint without the name and tag: subscriptions rename servers
+/// (traffic counters and dates in the name), but the address and keys remain the same.
 fn fingerprint(profile: &Profile) -> String {
     let mut copy = profile.outbound.clone();
     if let Some(obj) = copy.as_object_mut() {
@@ -825,7 +831,7 @@ mod tests {
         store.set_latency(id, 42, 1700).unwrap();
         store.add_traffic(id, 1000, 500).unwrap();
 
-        // Подписка прислала тот же сервер с новым именем и один новый сервер.
+        // The subscription sent the same server with a new name and one new server.
         let incoming = vec![
             profile("trojan://pw@a.example:443#новое имя"),
             profile("trojan://pw@b.example:443#второй"),
@@ -877,7 +883,7 @@ mod tests {
 
     #[test]
     fn unknown_settings_keys_are_ignored() {
-        let mut store = Store::open_memory().unwrap();
+        let store = Store::open_memory().unwrap();
         store
             .conn
             .execute(
@@ -888,8 +894,8 @@ mod tests {
         assert_eq!(store.settings().unwrap().mixed_port, 2080);
     }
 
-    /// Импорт читает базу Throne как есть — включая записи, которые наш код
-    /// сам бы не создал.
+    /// The import reads the Throne database as is — including records that our code
+    /// would not create itself.
     #[test]
     fn import_from_throne_layout() {
         let dir = tempfile::tempdir().unwrap();
@@ -922,16 +928,21 @@ mod tests {
         let done = store.import_throne(&src_path).unwrap();
         assert_eq!(done.groups, 2);
         assert_eq!(done.profiles, 1, "профиль с битым outbound не переносится");
-        assert_eq!(done.rules, 0, "в базе без таблиц маршрутизации нечего переносить");
+        assert_eq!(
+            done.rules, 0,
+            "в базе без таблиц маршрутизации нечего переносить"
+        );
 
         let imported = store.groups().unwrap();
-        assert!(imported.iter().any(|g| g.name == "xfizz" && g.is_subscription()));
+        assert!(imported
+            .iter()
+            .any(|g| g.name == "xfizz" && g.is_subscription()));
         let all = store.profiles(None).unwrap();
         assert_eq!(all[0].name, "DE #1");
         assert_eq!(all[0].latency, 55);
     }
 
-    /// Правило Throne переносится со всеми своими условиями сразу.
+    /// A Throne rule is imported together with all of its conditions.
     #[test]
     fn import_carries_throne_route_rules() {
         let dir = tempfile::tempdir().unwrap();
@@ -997,7 +1008,10 @@ mod tests {
         let rules = store.settings().unwrap().route_rules;
         assert_eq!(rules[0].name, "Bypass");
         let kinds: Vec<MatchKind> = rules[0].conditions.iter().map(|c| c.kind).collect();
-        assert_eq!(kinds, vec![MatchKind::Domain, MatchKind::IpCidr, MatchKind::RuleSet]);
+        assert_eq!(
+            kinds,
+            vec![MatchKind::Domain, MatchKind::IpCidr, MatchKind::RuleSet]
+        );
         assert_eq!(rules[0].conditions[0].values, vec!["mos.ru"]);
         assert_eq!(rules[0].match_mode, MatchMode::Any);
         assert_eq!(rules[0].action, RouteAction::Direct);

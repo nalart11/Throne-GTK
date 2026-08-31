@@ -1,8 +1,8 @@
-//! Мост из `tracing` в журнал окна.
+//! A bridge from `tracing` to the window log.
 //!
-//! Ядро пишет свои сообщения через `tracing` (их туда кладёт `throne-ipc`),
-//! и то же самое должно быть видно в интерфейсе — иначе разбирать отказ
-//! подключения приходится в терминале.
+//! The core writes its messages through `tracing` (placed there by `throne-ipc`),
+//! and the same messages must be visible in the interface — otherwise diagnosing
+//! a connection failure requires using the terminal.
 
 use async_channel::Sender;
 use tracing::field::{Field, Visit};
@@ -56,7 +56,7 @@ impl<S: Subscriber> Layer<S> for LogBridge {
             format!("[{}] {}", metadata.target(), visitor.message)
         };
 
-        // Канал не блокируем: журнал не стоит того, чтобы тормозить ядро.
+        // Do not block on the channel: the log is not worth slowing the core down.
         let _ = self.sender.try_send(Event::Log(line));
     }
 }

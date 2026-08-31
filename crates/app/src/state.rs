@@ -1,4 +1,4 @@
-//! Состояние приложения, общее для всех страниц окна.
+//! Application state shared by all window pages.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -10,8 +10,8 @@ use throne_store::Store;
 
 use crate::engine::{Command, Engine, Status};
 
-/// Сколько строк журнала держим в памяти. Ядро при уровне debug пишет часто,
-/// и без потолка окно за час съедает сотни мегабайт.
+/// Number of log lines kept in memory. At debug level the core writes often,
+/// and without a limit the window would consume hundreds of megabytes per hour.
 const LOG_LIMIT: usize = 2000;
 
 pub struct State {
@@ -19,9 +19,9 @@ pub struct State {
     pub settings: RefCell<Settings>,
     pub engine: Engine,
     pub status: RefCell<Status>,
-    /// Группа, открытая в списке серверов.
+    /// Group currently open in the server list.
     pub current_gid: Cell<i64>,
-    /// Профиль, выбранный в списке (не обязательно подключённый).
+    /// Profile selected in the list (not necessarily connected).
     pub selected_id: Cell<i64>,
     pub log: RefCell<VecDeque<String>>,
 }
@@ -54,8 +54,8 @@ impl State {
         }
     }
 
-    /// Выбран ли автовыбор. Отрицательный идентификатор означает «вся группа
-    /// целиком»: настоящих профилей с такими номерами не бывает.
+    /// Whether auto-selection is selected. A negative identifier means “the
+    /// entire group”: real profiles never have such IDs.
     pub fn auto_selected(&self) -> Option<i64> {
         match self.selected_id.get() {
             id if id < 0 => Some(-id),
@@ -71,16 +71,16 @@ impl State {
         self.store.borrow().profile(id).ok().flatten()
     }
 
-    /// Сохраняет настройки и запоминает выбранный профиль, чтобы следующий
-    /// запуск открылся там же, где закрылся предыдущий.
-    /// Путь к кэшу в базу не попадает — он помечен `serde(skip)`.
-    /// Перечитывает настройки из базы. Нужен после того, как в базу пишут
-    /// мимо окна — например, при импорте правил: иначе окно продолжит
-    /// показывать старое, а первое же сохранение затрёт чужую запись своей
-    /// копией.
+    /// Saves settings and remembers the selected profile so the next launch
+    /// opens where the previous one closed.
+    /// The cache path is not stored in the database — it is marked `serde(skip)`.
+    /// Reloads settings from the database. Needed after writing to the database
+    /// outside the window — for example, when importing rules: otherwise the
+    /// window keeps showing stale data, and the first save overwrites the other
+    /// record with its own copy.
     pub fn reload_settings(&self) -> Result<()> {
-        // cache_file задаётся путями запуска и в базе не значим: перечитывание
-        // стёрло бы его.
+        // cache_file is set by startup paths and is not meaningful in the database:
+        // reloading would erase it.
         let cache_file = self.settings.borrow().cache_file.clone();
         let mut settings = self.store.borrow().settings()?;
         settings.cache_file = cache_file;
@@ -92,8 +92,8 @@ impl State {
         let mut settings = self.settings.borrow().clone();
         settings.last_profile_id = self.selected_id.get();
         self.store.borrow_mut().save_settings(&settings)?;
-        // Перечитывание из базы стёрло бы cache_file, поэтому храним копию
-        // как есть.
+        // Reloading from the database would erase cache_file, so keep a copy
+        // unchanged.
         *self.settings.borrow_mut() = settings;
         Ok(())
     }
@@ -120,9 +120,9 @@ impl State {
         });
     }
 
-    /// Подключение с автовыбором по группе. Серверы отдаются отсортированными
-    /// по задержке: ядро принимает этот порядок за исходное ранжирование, и
-    /// первый выбор оказывается осмысленным ещё до первой проверки.
+    /// Connect with group auto-selection. Servers are returned sorted by latency:
+    /// the core treats this order as the initial ranking, making the first choice
+    /// meaningful even before the first check.
     pub fn connect_auto(&self, gid: i64) {
         let mut profiles = match self.store.borrow().profiles(Some(gid)) {
             Ok(profiles) => profiles,
@@ -144,8 +144,8 @@ impl State {
         self.engine.send(Command::Disconnect);
     }
 
-    /// После импорта или подписки открывать пустую группу бессмысленно —
-    /// переводим взгляд туда, где серверы есть.
+    /// After an import or subscription, opening an empty group is pointless —
+    /// move the view to where servers exist.
     pub fn focus_group_with_servers(&self) {
         let store = self.store.borrow();
         if store
@@ -161,8 +161,8 @@ impl State {
     }
 }
 
-/// Группа, с которой открывается список: та, где лежит последний выбранный
-/// сервер, иначе первая непустая, иначе группа по умолчанию.
+/// Group with which the list opens: the one containing the last selected server,
+/// otherwise the first non-empty group, otherwise the default group.
 fn starting_group(store: &Store, selected_profile: i64) -> i64 {
     if selected_profile != 0 {
         if let Ok(Some(profile)) = store.profile(selected_profile) {
