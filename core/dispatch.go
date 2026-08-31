@@ -39,7 +39,9 @@ func runDispatch(conn net.Conn) {
 			return
 		}
 		if len(data) > 0 {
-			conn.Write(data) //nolint:errcheck — connection error caught on next read
+			if _, err := conn.Write(data); err != nil {
+				return
+			}
 		}
 	}
 

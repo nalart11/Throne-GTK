@@ -1,8 +1,8 @@
-//! Главное окно.
+//! Main window.
 //!
-//! Сверху — «канал»: состояние, имя сервера, кнопка и живая линия трафика.
-//! Ниже — три страницы: серверы, соединения, журнал. Всё, что меняется во
-//! времени, обновляется из одного места — [`Window::apply_event`].
+//! At the top is the “channel”: state, server name, button, and live traffic line.
+//! Below are three pages: servers, connections, and log. Everything that changes
+//! over time is updated in one place — [`Window::apply_event`].
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -33,10 +33,10 @@ pub struct Window {
     connections: Rc<connections::ConnectionsPage>,
     logs: Rc<logs::LogsPage>,
 
-    /// Идёт ли сейчас прогон задержек — от этого зависит подпись кнопки теста.
+    /// Whether a latency test is currently running; this determines the test button label.
     testing: RefCell<bool>,
-    /// Интерфейс приводится в соответствие настройкам: сигналы виджетов в это
-    /// время не означают выбор человека и не должны ничего сохранять.
+    /// Brings the interface into line with the settings: widget signals during
+    /// this time do not represent user choices and must not save anything.
     syncing: std::cell::Cell<bool>,
 }
 
@@ -68,12 +68,14 @@ impl Window {
             .add_titled(&logs.widget, Some("logs"), "Журнал")
             .set_icon_name(Some("text-x-generic-symbolic"));
 
-        // ── шапка ───────────────────────────────────────────────────────
+        // ── header ───────────────────────────────────────────────────────
         let header = adw::HeaderBar::builder()
-            .title_widget(&adw::ViewSwitcher::builder()
-                .stack(&stack)
-                .policy(adw::ViewSwitcherPolicy::Wide)
-                .build())
+            .title_widget(
+                &adw::ViewSwitcher::builder()
+                    .stack(&stack)
+                    .policy(adw::ViewSwitcherPolicy::Wide)
+                    .build(),
+            )
             .build();
 
         let add_button = gtk::Button::builder()
@@ -90,7 +92,7 @@ impl Window {
             .build();
         header.pack_end(&menu_button);
 
-        // ── статусная панель ────────────────────────────────────────────
+        // ── status panel ────────────────────────────────────────────
         let state_label = gtk::Label::builder()
             .label("НЕ ПОДКЛЮЧЕНО")
             .xalign(0.0)
@@ -157,8 +159,8 @@ impl Window {
         channel.append(&sparkline.widget);
         channel.append(&rates);
 
-        // На широком мониторе строка списка иначе растягивается на всю
-        // ширину, и глазу приходится ехать от имени сервера к его задержке.
+        // On a wide monitor the list row would otherwise stretch across the full
+        // width, forcing the eye to travel from the server name to its latency.
         let clamp = adw::Clamp::builder()
             .maximum_size(920)
             .tightening_threshold(720)
@@ -170,27 +172,30 @@ impl Window {
             .build();
         content.append(&clamp);
         content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        content.append(&adw::Clamp::builder()
-            .maximum_size(920)
-            .tightening_threshold(720)
-            .child(&stack)
-            .vexpand(true)
-            .build());
+        content.append(
+            &adw::Clamp::builder()
+                .maximum_size(920)
+                .tightening_threshold(720)
+                .child(&stack)
+                .vexpand(true)
+                .build(),
+        );
         stack.set_vexpand(true);
 
         let toolbar = adw::ToolbarView::builder().content(&content).build();
         toolbar.add_top_bar(&header);
-        // На узком окне переключатель уезжает вниз — так подписи страниц
-        // остаются читаемыми, а шапка не переполняется.
+        // In a narrow window the switcher moves down so page labels remain
+        // readable and the header does not overflow.
         let bottom_switcher = adw::ViewSwitcherBar::builder().stack(&stack).build();
         toolbar.add_bottom_bar(&bottom_switcher);
 
-        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 560px").unwrap());
-        // На узком окне переключатель страниц уезжает вниз; заголовок в шапке
-        // при этом прячем — две строки подписей друг над другом не нужны.
+        let breakpoint =
+            adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 560px").unwrap());
+        // In a narrow window the page switcher moves down; hide the header title
+        // so two rows of labels are not stacked on top of each other.
         breakpoint.add_setter(&bottom_switcher, "reveal", Some(&true.to_value()));
-        // Заголовок в шапке при этом не трогаем: подмена title-widget через
-        // сеттер брейкпоинта роняет предупреждение GLib на временном объекте.
+        // Do not touch the header title here: replacing title-widget through the
+        // breakpoint setter triggers a GLib warning on a temporary object.
         root.add_breakpoint(breakpoint);
 
         toasts.set_child(Some(&toolbar));
@@ -221,7 +226,7 @@ impl Window {
     }
 
     fn wire(self: &Rc<Self>, add_button: &gtk::Button) {
-        // Подключение и отключение — одна кнопка: состояние очевидно из подписи.
+        // Connecting and disconnecting use one button: the label makes the state obvious.
         self.connect_button.connect_clicked({
             let this = Rc::downgrade(self);
             move |_| {
@@ -270,8 +275,8 @@ impl Window {
                         settings.mode = next;
                     }
                     let _ = this.state.save_settings();
-                    // Режим меняет входы в конфиге — на живом соединении его
-                    // надо пересобрать, иначе переключатель врёт.
+                    // The mode changes config inbounds; on a live connection it
+                    // must be rebuilt, otherwise the switch lies.
                     if this.state.is_connected() {
                         this.state.connect_selected();
                         this.toast(if vpn {
@@ -284,7 +289,7 @@ impl Window {
             });
         }
 
-        // Список серверов сам решает, когда пора подключаться и обновлять шапку.
+        // The server list decides when to connect and update the header.
         self.servers.connect_activated({
             let this = Rc::downgrade(self);
             move || {
@@ -327,7 +332,7 @@ impl Window {
         });
     }
 
-    /// Единственная точка, куда приходят новости из фонового потока.
+    /// The single point where updates from the background thread arrive.
     pub fn apply_event(self: &Rc<Self>, event: Event) {
         match event {
             Event::Status(status) => {
@@ -355,7 +360,8 @@ impl Window {
             }
             Event::Traffic { down, up } => {
                 self.sparkline.push(down, up);
-                self.down_label.set_label(&format!("↓ {}", format::rate(down)));
+                self.down_label
+                    .set_label(&format!("↓ {}", format::rate(down)));
                 self.up_label.set_label(&format!("↑ {}", format::rate(up)));
                 let id = self.state.connected_id();
                 if id != 0 {
@@ -370,8 +376,8 @@ impl Window {
                 total,
                 suspended,
             } => {
-                // Автовыбор меняет сервер сам — шапка обязана показывать, кто
-                // выбран прямо сейчас, иначе «Подключено» ничего не говорит.
+                // Auto-selection changes the server itself; the header must show
+                // who is selected now, otherwise “Connected” says nothing.
                 let name = if selected.is_empty() {
                     "выбирает сервер…".to_string()
                 } else if !pinned.is_empty() && pinned == selected {
@@ -382,8 +388,8 @@ impl Window {
                 self.name_label.set_label(&format!("Авто · {name}"));
                 self.name_label.remove_css_class("empty");
                 self.state_label.set_label(&if suspended {
-                    // Ядро отличает «сеть недоступна» от «серверы мертвы»:
-                    // во втором случае перебирать серверы бессмысленно.
+                    // The core distinguishes “network unavailable” from “servers
+                    // are dead”; in the latter case retrying servers is pointless.
                     "СЕТЬ НЕДОСТУПНА".to_string()
                 } else {
                     format!("ПОДКЛЮЧЕНО · ЖИВЫХ {alive} ИЗ {total}")
@@ -419,7 +425,11 @@ impl Window {
                         .borrow()
                         .set_speed(id, &download, &upload, &country);
                     if latency > 0 {
-                        let _ = self.state.store.borrow().set_latency(id, latency, unix_now());
+                        let _ = self
+                            .state
+                            .store
+                            .borrow()
+                            .set_latency(id, latency, unix_now());
                         self.servers.update_latency(id, latency);
                     }
                     self.servers.update_speed(id);
@@ -430,8 +440,8 @@ impl Window {
                         (true, true) => "Замер не дал результата".to_string(),
                     });
                 } else {
-                    // Строка вернётся к прежнему значению: показанный прогресс
-                    // не должен остаться вместо результата.
+                    // The row returns to its previous value: displayed progress
+                    // must not remain in place of the result.
                     self.servers.update_speed(id);
                     self.toast(&first_line(&format!("Замер не удался: {error}")));
                 }
@@ -512,7 +522,7 @@ impl Window {
         self.syncing.set(false);
     }
 
-    /// Приводит шапку в соответствие состоянию: подпись, имя сервера, кнопка.
+    /// Brings the header in line with the state: label, server name, and button.
     fn refresh_channel(self: &Rc<Self>) {
         let status = self.state.status.borrow().clone();
         let (label, class) = match &status {
@@ -544,8 +554,11 @@ impl Window {
         }
 
         let connected = matches!(status, Status::Connected { .. });
-        self.connect_button
-            .set_label(if connected { "Отключить" } else { "Подключить" });
+        self.connect_button.set_label(if connected {
+            "Отключить"
+        } else {
+            "Подключить"
+        });
         if connected {
             self.connect_button.add_css_class("live");
         } else {
@@ -567,8 +580,8 @@ impl Window {
         &self.servers
     }
 
-    /// Проверка задержек: рабочее соединение при этом не рвётся — тест
-    /// поднимает отдельное ядро.
+    /// Latency testing does not interrupt the active connection; the test starts
+    /// a separate core.
     pub fn start_test(self: &Rc<Self>) {
         if *self.testing.borrow() {
             self.state.engine.send(Command::StopTest);
@@ -596,7 +609,7 @@ impl Window {
         });
     }
 
-    /// Просит автовыбор пересчитать ранжирование прямо сейчас.
+    /// Asks auto-selection to recalculate its ranking right now.
     pub fn recheck_auto(self: &Rc<Self>) {
         if self.state.connected_id() >= 0 {
             self.toast("Автовыбор сейчас не используется");
@@ -606,7 +619,7 @@ impl Window {
         self.toast("Перепроверяю серверы группы…");
     }
 
-    /// Замер скорости выбранного сервера.
+    /// Measures the selected server’s speed.
     pub fn start_speed_test(self: &Rc<Self>, id: i64) {
         let profile = self.state.store.borrow().profile(id).ok().flatten();
         let Some(profile) = profile else {
@@ -640,12 +653,12 @@ fn set_state_class(label: &gtk::Label, class: &str) {
     }
 }
 
-/// Переключатель режима: два связанных тумблера вместо выпадающего списка —
-/// режимов ровно два, и оба должны быть видны без клика.
+/// Mode switch: two linked toggles instead of a drop-down list; there are exactly
+/// two modes, and both must be visible without a click.
 ///
-/// Начальное состояние задаётся здесь, до подключения обработчиков: GTK делает
-/// активной первую кнопку группы, и подключённый обработчик принял бы это за
-/// выбор человека — приложение молча переключалось бы в VPN при каждом запуске.
+/// The initial state is set here before handlers are connected: GTK activates the
+/// first button in the group, and a connected handler would mistake that for a
+/// user choice, silently switching the application to VPN on every launch.
 fn mode_switch(vpn: bool) -> (gtk::Box, gtk::ToggleButton, gtk::ToggleButton) {
     let container = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
@@ -705,7 +718,7 @@ pub fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Ошибки ядра бывают многострочными; во всплывающем сообщении помещается одна.
+/// Core errors can span multiple lines; only one fits in the toast message.
 fn first_line(message: &str) -> String {
     message.lines().next().unwrap_or(message).to_string()
 }

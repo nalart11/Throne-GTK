@@ -79,10 +79,12 @@ just install        # или ./scripts/install.sh
 TUN-интерфейс требует прав. Один раз:
 
 ```sh
-just grant-tun      # setcap cap_net_admin,cap_net_raw+ep build/throne-gtk-core
+just grant-tun      # setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep для ядра
 ```
 
-Без этого режим VPN откажется включаться и скажет, какую команду выполнить.
+Права живут на файле ядра, а `just install` создаёт его заново, поэтому после
+переустановки `grant-tun` нужно повторять. Без прав режим VPN откажется
+включаться и скажет, какую команду выполнить.
 Режим «Прокси» прав не требует.
 
 ## Данные

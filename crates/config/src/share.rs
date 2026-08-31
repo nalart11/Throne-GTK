@@ -1,7 +1,7 @@
-//! Обратная операция к [`crate::link`]: outbound → ссылка.
+//! The reverse operation of [`crate::link`]: outbound → link.
 //!
-//! Нужна для «скопировать ссылку» и экспорта группы. Round-trip через
-//! `link::parse` обязан давать тот же outbound — это проверяется тестами.
+//! Used for “copy link” and group export. A round trip through
+//! `link::parse` must produce the same outbound; tests verify this.
 
 use anyhow::{bail, Result};
 use base64::engine::general_purpose::STANDARD;
@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 
 use crate::profile::Profile;
 
-/// Экранируем всё, что может сломать разбор ссылки, включая `&`, `=`, `#` и `+`
-/// (последний в query читается как пробел).
+/// Escape everything that can break link parsing, including `&`, `=`, `#`, and `+`
+/// (the latter is read as a space in a query).
 const ESCAPE: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')
@@ -46,7 +46,7 @@ fn host_for_url(host: &str) -> String {
     }
 }
 
-/// Ссылка на профиль в формате, который поймут другие клиенты.
+/// A profile link in a format understood by other clients.
 pub fn to_link(profile: &Profile) -> Result<String> {
     let o = &profile.outbound;
     let kind = o["type"].as_str().unwrap_or_default();
@@ -68,7 +68,7 @@ pub fn to_link(profile: &Profile) -> Result<String> {
             )
         }
         "vmess" => {
-            // Формат v2rayN: base64 от JSON, а не query-строка.
+            // v2rayN format: base64 of JSON, not a query string.
             let transport = &o["transport"];
             let tls = &o["tls"];
             let payload = json!({
@@ -116,7 +116,10 @@ pub fn to_link(profile: &Profile) -> Result<String> {
         "hysteria2" => {
             let mut q = tls_query(o);
             if let Some(obfs) = o["obfs"]["password"].as_str() {
-                q.push(("obfs".into(), o["obfs"]["type"].as_str().unwrap_or("salamander").into()));
+                q.push((
+                    "obfs".into(),
+                    o["obfs"]["type"].as_str().unwrap_or("salamander").into(),
+                ));
                 q.push(("obfs-password".into(), obfs.into()));
             }
             format!(
@@ -190,7 +193,7 @@ pub fn to_link(profile: &Profile) -> Result<String> {
     Ok(link)
 }
 
-/// Ссылки на набор профилей, по одной на строку.
+/// Links for a set of profiles, one per line.
 pub fn to_links(profiles: &[Profile]) -> String {
     profiles
         .iter()
@@ -218,7 +221,10 @@ fn tls_query(o: &Value) -> Vec<(String, String)> {
     let reality = &tls["reality"];
     if reality["enabled"] == json!(true) {
         q.push(("security".into(), "reality".into()));
-        q.push(("pbk".into(), reality["public_key"].as_str().unwrap_or_default().into()));
+        q.push((
+            "pbk".into(),
+            reality["public_key"].as_str().unwrap_or_default().into(),
+        ));
         if let Some(sid) = reality["short_id"].as_str().filter(|s| !s.is_empty()) {
             q.push(("sid".into(), sid.into()));
         }
@@ -228,7 +234,10 @@ fn tls_query(o: &Value) -> Vec<(String, String)> {
     if let Some(sni) = tls["server_name"].as_str().filter(|s| !s.is_empty()) {
         q.push(("sni".into(), sni.into()));
     }
-    if let Some(fp) = tls["utls"]["fingerprint"].as_str().filter(|s| !s.is_empty()) {
+    if let Some(fp) = tls["utls"]["fingerprint"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+    {
         q.push(("fp".into(), fp.into()));
     }
     if let Some(alpn) = tls["alpn"].as_array() {
@@ -283,7 +292,7 @@ mod tests {
     use super::*;
     use crate::link;
 
-    /// Ссылка → профиль → ссылка → профиль: outbound и имя обязаны совпасть.
+    /// Link → profile → link → profile: outbound and name must match.
     fn round_trip(original: &str) {
         let first = link::parse(original).unwrap();
         let regenerated = to_link(&first).unwrap();
@@ -310,7 +319,9 @@ mod tests {
 
     #[test]
     fn trojan_grpc_round_trip() {
-        round_trip("trojan://p%40ss@t.example:443?type=grpc&serviceName=svc&sni=t.example&fp=chrome#tr");
+        round_trip(
+            "trojan://p%40ss@t.example:443?type=grpc&serviceName=svc&sni=t.example&fp=chrome#tr",
+        );
     }
 
     #[test]
@@ -323,7 +334,9 @@ mod tests {
 
     #[test]
     fn hysteria2_round_trip() {
-        round_trip("hysteria2://pw@h.example:443?obfs=salamander&obfs-password=zzz&sni=h.example#hy");
+        round_trip(
+            "hysteria2://pw@h.example:443?obfs=salamander&obfs-password=zzz&sni=h.example#hy",
+        );
     }
 
     #[test]
@@ -368,8 +381,9 @@ mod tests {
 
     #[test]
     fn unknown_protocol_is_reported() {
-        let p = Profile::from_outbound(json!({"type": "wireguard", "server": "a", "server_port": 1}))
-            .unwrap();
+        let p =
+            Profile::from_outbound(json!({"type": "wireguard", "server": "a", "server_port": 1}))
+                .unwrap();
         assert!(to_link(&p).is_err());
     }
 }

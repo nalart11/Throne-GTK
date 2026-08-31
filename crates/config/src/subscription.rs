@@ -1,9 +1,9 @@
-//! Загрузка и разбор подписок.
+//! Loading and parsing subscriptions.
 //!
-//! Единого формата нет: панели отдают либо base64 от списка ссылок, либо тот же
-//! список открытым текстом, либо Clash-YAML, либо готовый JSON sing-box.
-//! Определяем формат по содержимому, а не по заголовкам — Content-Type у
-//! половины панелей `text/plain` независимо от того, что внутри.
+//! There is no single format: panels provide either base64 of a link list, the same
+//! list as plain text, Clash YAML, or ready-made sing-box JSON.
+//! We determine the format from the content rather than headers; Content-Type for
+//! half of panels is `text/plain` regardless of what is inside.
 
 use anyhow::{bail, Context, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -14,18 +14,18 @@ use std::time::Duration;
 use crate::link;
 use crate::profile::Profile;
 
-/// Результат разбора: что удалось прочитать и на чём споткнулись.
+/// Parsing result: what was read successfully and what failed.
 #[derive(Debug, Default)]
 pub struct Parsed {
     pub profiles: Vec<Profile>,
     pub errors: Vec<String>,
-    /// Строка вида `упаковано 12 ГиБ из 100 ГиБ, до 2027-02-03` из заголовка
-    /// `subscription-userinfo`, если панель его прислала.
+    /// A string such as `packed 12 GiB of 100 GiB, until 2027-02-03` from the
+    /// `subscription-userinfo` header, if the panel sent it.
     pub info: String,
 }
 
-/// Скачивает тело подписки. Возвращает вместе с ним содержимое заголовка
-/// `subscription-userinfo` — трафик и срок, которые панели кладут только туда.
+/// Downloads the subscription body. Returns it together with the contents of the
+/// `subscription-userinfo` header, where panels store traffic and expiry information.
 pub async fn fetch(
     url: &str,
     user_agent: &str,
@@ -167,29 +167,29 @@ fn device_model() -> String {
     String::new()
 }
 
-/// Разбирает тело подписки в любом из известных форматов.
+/// Parses a subscription body in any known format.
 pub fn parse(body: &str) -> Result<Parsed> {
     let text = body.trim();
     if text.is_empty() {
         bail!("подписка пуста");
     }
 
-    // JSON: либо массив outbound-ов, либо конфиг sing-box целиком.
+    // JSON: either an array of outbounds or a complete sing-box configuration.
     if text.starts_with('{') || text.starts_with('[') {
         if let Ok(v) = serde_json::from_str::<Value>(text) {
             return Ok(parse_json(&v));
         }
     }
 
-    // Clash: ищем ключ верхнего уровня, а не просто наличие двоеточия —
-    // base64 без паддинга тоже бывает похож на YAML.
+    // Clash: look for a top-level key rather than merely a colon;
+    // unpadded base64 can also resemble YAML.
     if text.contains("proxies:") {
         if let Ok(parsed) = parse_clash(text) {
             return Ok(parsed);
         }
     }
 
-    // Список ссылок: как есть или в base64.
+    // Link list: plain or base64-encoded.
     if let Some(decoded) = try_decode_body(text) {
         let (profiles, errors) = link::parse_many(&decoded);
         if !profiles.is_empty() {
@@ -220,7 +220,7 @@ pub fn parse(body: &str) -> Result<Parsed> {
 }
 
 fn try_decode_body(text: &str) -> Option<String> {
-    // Тело в base64 не содержит `://` — по этому и отличаем его от списка ссылок.
+    // A base64 body does not contain `://`, which distinguishes it from a link list.
     if text.contains("://") {
         return None;
     }
@@ -242,7 +242,7 @@ fn parse_json(v: &Value) -> Parsed {
 
     let mut out = Parsed::default();
     for ob in outbounds {
-        // Служебные outbound-ы конфига — не серверы.
+        // Service outbounds in a configuration are not servers.
         let kind = ob.get("type").and_then(Value::as_str).unwrap_or("");
         if matches!(
             kind,
@@ -258,8 +258,8 @@ fn parse_json(v: &Value) -> Parsed {
     out
 }
 
-/// Clash-конфиг. Переводим каждый `proxies[]` в ссылку и отдаём общему парсеру:
-/// поля там те же, что в ссылках, только разложены по ключам.
+/// Clash configuration. Convert each `proxies[]` entry to a link and pass it to the shared parser:
+/// the fields are the same as in links, only distributed across keys.
 fn parse_clash(text: &str) -> Result<Parsed> {
     let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).context("разбор YAML")?;
     let proxies = doc
@@ -313,7 +313,11 @@ fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
 
     let kind = ys(p, "type");
     let server = ys(p, "server");
-    let port = yn(p, "port").unwrap_or(0) as u16;
+    let port = match yn(p, "port") {
+        Some(n) if n <= u16::MAX as u64 => n as u16,
+        Some(_) => bail!("порт за пределами диапазона"),
+        None => 0,
+    };
     if server.is_empty() || port == 0 {
         bail!("нет адреса сервера");
     }
@@ -472,8 +476,8 @@ fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
     Profile::from_outbound(Value::Object(o))
 }
 
-/// Разбирает заголовок `subscription-userinfo` в человекочитаемую строку.
-/// Формат: `upload=0; download=1234; total=5678; expire=1700000000`.
+/// Parses the `subscription-userinfo` header into a human-readable string.
+/// Format: `upload=0; download=1234; total=5678; expire=1700000000`.
 pub fn format_userinfo(header: &str) -> String {
     let mut used = 0u64;
     let mut total = 0u64;
@@ -517,7 +521,7 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// Дата в ISO без внешних зависимостей: алгоритм Хиннанта (civil_from_days).
+/// ISO date without external dependencies: Hinnant's algorithm (civil_from_days).
 fn format_date(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
     let z = days + 719_468;

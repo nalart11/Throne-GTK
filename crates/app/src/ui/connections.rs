@@ -1,8 +1,7 @@
-//! Страница живых соединений.
+//! Live connections page.
 //!
-//! Отвечает на один вопрос: что прямо сейчас идёт через прокси. Поэтому
-//! сортировка — по объёму скачанного, а не по времени: сверху то, что реально
-//! тянет канал.
+//! Answers one question: what is currently going through the proxy. Therefore
+//! sorting is by downloaded volume, not time: what actually uses the channel is on top.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,8 +11,7 @@ use adw::prelude::*;
 use crate::engine::Connection;
 use crate::format;
 
-/// Больше строк человек всё равно не читает, а перерисовка раз в секунду
-/// начинает стоить заметно.
+/// Users do not read more rows anyway, and redrawing once per second becomes noticeable.
 const MAX_ROWS: usize = 120;
 
 pub struct ConnectionsPage {
@@ -78,8 +76,8 @@ impl ConnectionsPage {
         let total = connections.len();
         connections.truncate(MAX_ROWS);
 
-        // Ничего не изменилось — не трогаем виджеты: перерисовка списка раз в
-        // секунду заметна на прокрутке.
+        // Nothing changed, so leave the widgets alone: redrawing the list once
+        // per second is noticeable while scrolling.
         if *self.last.borrow() == connections {
             return;
         }
@@ -113,8 +111,8 @@ impl PartialEq for Connection {
 }
 
 fn build_row(connection: &Connection) -> gtk::ListBoxRow {
-    // Домен известен не всегда (голый IP, sniffing выключен) — тогда показываем
-    // адрес назначения, но подпись остаётся на своём месте.
+    // The domain is not always known (bare IP, sniffing disabled); show the
+    // destination address then, while keeping the label in place.
     let title = if connection.domain.is_empty() {
         connection.dest.clone()
     } else {
@@ -133,8 +131,8 @@ fn build_row(connection: &Connection) -> gtk::ListBoxRow {
         parts.push(connection.process.clone());
     }
     parts.push(connection.network.to_uppercase());
-    // created_at приходит в миллисекундах — соединения живут секунды, и в
-    // секундах же считается их возраст.
+    // created_at is in milliseconds; connections live for seconds, and their
+    // age is calculated in seconds as well.
     if connection.created_at > 0 {
         parts.push(format::since(connection.created_at / 1000));
     }
@@ -155,7 +153,7 @@ fn build_row(connection: &Connection) -> gtk::ListBoxRow {
     texts.append(&meta);
 
     let volume = gtk::Label::builder()
-        .label(&format!(
+        .label(format!(
             "↓ {}  ↑ {}",
             format::bytes(connection.download),
             format::bytes(connection.upload)

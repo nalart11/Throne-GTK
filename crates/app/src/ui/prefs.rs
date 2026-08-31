@@ -1,8 +1,8 @@
-//! Настройки.
+//! Settings.
 //!
-//! Каждый переключатель пишет значение сразу — отдельной кнопки «Применить»
-//! нет. Изменения, влияющие на живое соединение, применяются при следующем
-//! подключении; об этом сказано в подписи, а не выясняется опытом.
+//! Each switch writes its value immediately; there is no separate “Apply” button.
+//! Changes affecting a live connection apply on the next connection; this is
+//! stated in the subtitle rather than discovered through experience.
 
 use std::rc::Rc;
 
@@ -25,7 +25,7 @@ pub fn open(window: &Rc<Window>) {
     dialog.present(Some(&window.root));
 }
 
-/// Мелкая обвязка: применить изменение к настройкам и сохранить.
+/// Small helper: apply a settings change and save it.
 fn edit(window: &Rc<Window>, apply: impl FnOnce(&mut throne_config::Settings)) {
     {
         let mut settings = window.state().settings.borrow_mut();
@@ -334,7 +334,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
     let rules = adw::ActionRow::builder()
         .title("Правила маршрутизации")
-        .subtitle(&rules_subtitle(&settings))
+        .subtitle(rules_subtitle(&settings))
         .activatable(true)
         .build();
     rules.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -342,7 +342,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
         let window = window.clone();
         move |row| {
             crate::ui::routes::open(&window);
-            // Подпись обновится, когда человек вернётся из редактора.
+            // The subtitle updates when the user returns from the editor.
             let window = window.clone();
             let row = row.clone();
             glib::idle_add_local_once(move || {
@@ -690,7 +690,7 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page
 }
 
-/// Сколько правил задано — видно, не открывая редактор.
+/// How many rules are configured, visible without opening the editor.
 fn rules_subtitle(settings: &throne_config::Settings) -> String {
     let total = settings.route_rules.len();
     let enabled = settings.route_rules.iter().filter(|r| r.enabled).count();
@@ -704,8 +704,8 @@ fn rules_subtitle(settings: &throne_config::Settings) -> String {
     }
 }
 
-/// Текстовый редактор для случаев, которые не выражаются формой: это
-/// фрагмент конфига sing-box, и форма поверх него врала бы о его возможностях.
+/// Text editor for cases that cannot be expressed by the form: this is a sing-box
+/// config fragment, and a form layered over it would misrepresent its capabilities.
 pub(crate) fn open_rules_editor(window: &Rc<Window>) {
     let view = gtk::TextView::builder()
         .monospace(true)
@@ -764,8 +764,8 @@ pub(crate) fn open_rules_editor(window: &Rc<Window>) {
             let text = buffer
                 .text(&buffer.start_iter(), &buffer.end_iter(), false)
                 .to_string();
-            // Проверяем разбор здесь: иначе ошибка всплывёт только при
-            // подключении, когда правила уже забыты.
+            // Validate parsing here; otherwise the error appears only when
+            // connecting, after the rules have already been forgotten.
             if !text.trim().is_empty() {
                 if let Err(e) = serde_json::from_str::<serde_json::Value>(text.trim()) {
                     window.toast(&format!("Это не JSON: {e}"));

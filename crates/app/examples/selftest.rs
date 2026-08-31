@@ -1,16 +1,16 @@
-//! Проверка сквозного пути на настоящих данных: импорт базы Throne →
-//! генерация конфига → проверка этого конфига ядром.
+//! End-to-end test on real data: import the Throne database →
+//! generate a config → validate that config with the core.
 //!
-//! Запуск: `just selftest` — рецепт кладёт этот бинарь и ядро в одну папку под
-//! именем `throne-gtk`, потому что ядро отказывается работать с любым другим
-//! родителем. Ничего не меняет: база импортируется в память, ядро только
-//! валидирует конфиг и сразу гасится.
+//! Run with `just selftest`; the recipe places this binary and the core in one
+//! directory under the name `throne-gtk`, because the core rejects any other
+//! parent. It changes nothing: the database is imported into memory, the core
+//! only validates the config, and then exits.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use throne_config::Settings;
 use throne_config::generate::GeneratedConfig;
+use throne_config::Settings;
 use throne_ipc::Core;
 use throne_store::Store;
 
@@ -29,9 +29,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // `--seed <файл>` пишет импорт в настоящую базу: тот же перенос, что и
-    // кнопкой в меню, но из терминала — пригодится, если интерфейс не
-    // поднимается.
+    // `--seed <file>` writes the import to the real database: the same import as
+    // the menu button, but from the terminal, useful if the interface does not start.
     let seed = std::env::args()
         .skip_while(|a| a != "--seed")
         .nth(1)
@@ -54,7 +53,7 @@ async fn main() -> Result<()> {
     let all = store.profiles(None)?;
     let settings = Settings::default();
 
-    // Сначала — что вообще собирается в конфиг, без запуска ядра.
+    // First, check what can be built into a config without starting the core.
     let mut by_kind: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
     for profile in &all {
         let entry = by_kind.entry(profile.kind.clone()).or_default();
@@ -68,8 +67,8 @@ async fn main() -> Result<()> {
         println!("  {kind:<12} {ok}/{total}");
     }
 
-    // Затем — что из собранного примет само ядро.
-    // Ядро ищем рядом с собой: только так проходит его проверка родителя.
+    // Then check what the core itself accepts from the generated configs.
+    // Look for the core next to this executable; only then does its parent check pass.
     let core_bin = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("throne-gtk-core")))
@@ -83,8 +82,8 @@ async fn main() -> Result<()> {
     let mut checked = 0;
     let mut failed = Vec::new();
 
-    // Ядро проверяет по одному профилю на запуск, поэтому берём выборку:
-    // по первому профилю каждого протокола.
+    // The core checks one profile per launch, so take a sample: the first profile
+    // for each protocol.
     let mut seen = std::collections::BTreeSet::new();
     for profile in &all {
         if !seen.insert(profile.kind.clone()) {
@@ -94,10 +93,7 @@ async fn main() -> Result<()> {
             continue;
         };
         let core = Core::spawn(&core_bin, &runtime_dir, false).await?;
-        let outcome = core
-            .client
-            .check_config(load_request(&generated))
-            .await;
+        let outcome = core.client.check_config(load_request(&generated)).await;
         core.shutdown().await;
 
         checked += 1;
@@ -134,7 +130,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Пакетная проверка задержек — тот же путь, что у кнопки в списке.
+/// Batch latency check, using the same path as the list button.
 async fn latency_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
@@ -180,8 +176,8 @@ async fn latency_check(
     Ok(())
 }
 
-/// Конфиг с автовыбором: ядро должно принять группу `auto-selector` со всеми
-/// серверами. Это ловит расхождение с форком sing-box, в котором тип живёт.
+/// Auto-selection config: the core must accept the `auto-selector` group with all
+/// servers. This catches divergence from the sing-box fork where the type lives.
 async fn check_auto_selector(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
@@ -204,7 +200,7 @@ async fn check_auto_selector(
     Ok(())
 }
 
-/// Замер скорости первого сервера — тот же путь, что и в интерфейсе.
+/// Speed measurement for the first server, using the same path as the interface.
 async fn speed_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
@@ -249,17 +245,17 @@ async fn speed_check(
     Ok(())
 }
 
-/// Проверяет, что ядро понимает каждый заявленный протокол — включая те,
-/// которых нет в базе. Серверы выдуманные: проверяется разбор конфига, а не
-/// связь. Так ловится собранное без нужного тега ядро: тогда ядро отвечает
+/// Checks that the core understands every declared protocol, including those not
+/// in the database. Servers are fictional: this checks config parsing, not
+/// connectivity. This catches a core built without the required tag; then it responds
 /// «unknown outbound type».
 async fn check_synthetic_protocols(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
 ) -> Result<()> {
     const LINKS: &[&str] = &[
-        // Ключ reality обязан быть настоящим x25519 в base64url: ядро
-        // проверяет его формат ещё при разборе конфига.
+        // The reality key must be a real x25519 value in base64url: the core
+        // checks its format while parsing the config.
         "vless://11111111-1111-1111-1111-111111111111@a.example:443?security=reality\
 &pbk=jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0&sid=ab&flow=xtls-rprx-vision#vless",
         "vmess://eyJ2IjoiMiIsInBzIjoidm1lc3MiLCJhZGQiOiJhLmV4YW1wbGUiLCJwb3J0Ijo0NDMsImlkIjoiMTExMTExMTEtMTExMS0xMTExLTExMTEtMTExMTExMTExMTExIiwiYWlkIjowLCJuZXQiOiJ3cyIsInBhdGgiOiIvIiwidGxzIjoidGxzIn0=",
@@ -300,8 +296,8 @@ async fn check_synthetic_protocols(
     Ok(())
 }
 
-/// Поднимает первый профиль каждого протокола и ходит через него наружу.
-/// Порт нестандартный: рядом может работать оригинальный Throne на 2080.
+/// Starts the first profile for each protocol and accesses the outside through it.
+/// The port is non-standard because the original Throne may use 2080 nearby.
 async fn live_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
@@ -322,18 +318,18 @@ async fn live_check(
         }
         let generated = throne_config::generate(profile, &settings)?;
         let core = Core::spawn(core_bin, runtime_dir, false).await?;
-        let started = core
-            .client
-            .start(load_request(&generated))
-            .await;
+        let started = core.client.start(load_request(&generated)).await;
 
         if let Err(e) = started {
-            println!("  {:<12} {} — не запустился: {e}", profile.kind, profile.name);
+            println!(
+                "  {:<12} {} — не запустился: {e}",
+                profile.kind, profile.name
+            );
             core.shutdown().await;
             continue;
         }
 
-        // Ядру нужно мгновение, чтобы открыть слушающий порт.
+        // The core needs a moment to open the listening port.
         tokio::time::sleep(std::time::Duration::from_millis(700)).await;
 
         let client = reqwest::Client::builder()
@@ -341,7 +337,11 @@ async fn live_check(
             .timeout(std::time::Duration::from_secs(15))
             .build()?;
         let started_at = std::time::Instant::now();
-        match client.get("https://www.gstatic.com/generate_204").send().await {
+        match client
+            .get("https://www.gstatic.com/generate_204")
+            .send()
+            .await
+        {
             Ok(response) => println!(
                 "  {:<12} {} — {} за {} мс",
                 profile.kind,
@@ -349,7 +349,10 @@ async fn live_check(
                 response.status(),
                 started_at.elapsed().as_millis()
             ),
-            Err(e) => println!("  {:<12} {} — запрос не прошёл: {e}", profile.kind, profile.name),
+            Err(e) => println!(
+                "  {:<12} {} — запрос не прошёл: {e}",
+                profile.kind, profile.name
+            ),
         }
 
         let stats = core.client.query_stats().await.ok();

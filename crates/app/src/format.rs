@@ -1,5 +1,5 @@
-//! Единое форматирование чисел: то же представление в списке, в статусе и в
-//! таблице соединений.
+//! Unified number formatting: the same representation in the list, status, and
+//! connections table.
 
 pub fn bytes(value: i64) -> String {
     const UNITS: [&str; 5] = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
@@ -22,9 +22,9 @@ pub fn rate(bytes_per_second: i64) -> String {
     format!("{}/с", bytes(bytes_per_second))
 }
 
-/// Задержка и класс оформления к ней. Границы взяты по ощущению отклика:
-/// до 100 мс интерактивная работа не замечает задержки, после 300 мс её
-/// замечает даже загрузка страницы.
+/// Latency and its styling class. The boundaries reflect perceived responsiveness:
+/// interactive work does not notice latency below 100 ms, while after 300 ms even
+/// page loading notices it.
 pub fn latency(ms: i32) -> (String, &'static str) {
     match ms {
         0 => ("—".into(), ""),
@@ -35,7 +35,7 @@ pub fn latency(ms: i32) -> (String, &'static str) {
     }
 }
 
-/// Сколько времени прошло с момента в unix-времени.
+/// How much time has passed since a Unix timestamp.
 pub fn since(unix: i64) -> String {
     if unix <= 0 {
         return "никогда".into();

@@ -1,8 +1,7 @@
-//! Правила маршрутизации.
+//! Routing rules.
 //!
-//! Список правил и редактор одного правила. Порядок в списке — это и есть
-//! порядок применения: срабатывает первое подошедшее, поэтому стрелки
-//! перемещения здесь не украшение, а способ задать приоритет.
+//! Rule list and single-rule editor. List order is application order: the first
+//! matching rule is used, so the move arrows set priority rather than decorate.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -71,16 +70,16 @@ pub fn open(window: &Rc<Window>) {
         let window = window.clone();
         let dialog = dialog.clone();
         let rebuild = rebuild.clone();
-        // Новое правило появляется в списке только после сохранения: иначе
-        // передумавший человек оставляет за собой пустые строки.
+        // A new rule appears in the list only after saving; otherwise a user who
+        // changes their mind leaves empty rows behind.
         move |_| edit_rule(&window, &dialog, None, rebuild.clone())
     });
 
     import.connect_clicked({
         let window = window.clone();
         let rebuild = rebuild.clone();
-        // Правила переносятся отдельно от серверов: их обычно уже импортировали
-        // раньше, и повторный полный импорт добавил бы вторые копии групп.
+        // Rules are imported separately from servers: they have usually already
+        // been imported, and another full import would duplicate the groups.
         move |_| {
             let outcome = window
                 .state()
@@ -90,22 +89,19 @@ pub fn open(window: &Rc<Window>) {
             match outcome {
                 Ok((0, 0)) => window.toast("В Throne нет правил для переноса"),
                 Ok((added, skipped)) => {
-                    // Импорт пишет прямо в базу, а окно живёт своей копией
-                    // настроек: без перечитывания правил не видно, а первое
-                    // же сохранение настроек затрёт их.
+                    // Import writes directly to the database while the window has
+                    // its own settings copy: without reloading, rules are hidden,
+                    // and the first settings save overwrites them.
                     if let Err(e) = window.state().reload_settings() {
                         window.toast(&format!("Правила перенесены, но не прочитаны: {e}"));
                         return;
                     }
                     rebuild();
                     let mut text = format!("Перенесено правил: {added}");
-                    // Умолчать нельзя: человек решит, что маршрутизация
-                    // переехала целиком, и не поймёт, почему часть трафика
-                    // идёт не туда.
+                    // This cannot be omitted: the user would assume routing was
+                    // fully imported and would not understand misplaced traffic.
                     if skipped > 0 {
-                        text.push_str(&format!(
-                            ". Не перенеслось: {skipped} — задайте их заново"
-                        ));
+                        text.push_str(&format!(". Не перенеслось: {skipped} — задайте их заново"));
                     }
                     window.toast(&text);
                 }
@@ -117,8 +113,8 @@ pub fn open(window: &Rc<Window>) {
     dialog.present(Some(&window.root));
 }
 
-/// Перестраивает список правил целиком: их единицы, а частичное обновление
-/// строк с переключателями и стрелками стоило бы дороже, чем даёт.
+/// Rebuilds the rule list completely: there are few rules, and partial updates
+/// of rows with switches and arrows would cost more than they provide.
 fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog) {
     while let Some(child) = group.first_child().and_then(find_listbox_row) {
         group.remove(&child);
@@ -145,8 +141,8 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
     let total = rules.len();
     for (index, rule) in rules.iter().enumerate() {
         let row = adw::ActionRow::builder()
-            .title(&rule.display_name())
-            .subtitle(&format!(
+            .title(rule.display_name())
+            .subtitle(format!(
                 "{} · {}",
                 rule.conditions_title(),
                 rule.action.title()
@@ -244,8 +240,8 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
 }
 
 fn find_listbox_row(widget: gtk::Widget) -> Option<gtk::Widget> {
-    // AdwPreferencesGroup хранит строки внутри вложенного списка; ищем их,
-    // а не первого попавшегося потомка, иначе снесём заголовок группы.
+    // AdwPreferencesGroup stores rows inside a nested list; search there rather
+    // than for the first descendant, or the group heading would be removed.
     let mut queue = vec![widget];
     while let Some(current) = queue.pop() {
         if current.is::<adw::ActionRow>() {
@@ -280,10 +276,9 @@ fn save(window: &Rc<Window>) {
     }
 }
 
-/// Редактор одного правила. `index` — правило из списка, `None` — новое.
-/// Редактор одного правила. Условий у правила может быть несколько: список
-/// исключений обычно смешивает домены, адреса и процессы, и держать их
-/// отдельными правилами — значит четырежды повторить одно и то же действие.
+/// Single-rule editor. `index` is a rule from the list; `None` is a new rule.
+/// A rule may have multiple conditions: an exclusion list commonly mixes domains,
+/// addresses, and processes, and separate rules would repeat the same action.
 fn edit_rule(
     window: &Rc<Window>,
     parent: &adw::Dialog,
@@ -291,7 +286,15 @@ fn edit_rule(
     rebuild: Rc<dyn Fn()>,
 ) {
     let rule = index
-        .and_then(|index| window.state().settings.borrow().route_rules.get(index).cloned())
+        .and_then(|index| {
+            window
+                .state()
+                .settings
+                .borrow()
+                .route_rules
+                .get(index)
+                .cloned()
+        })
         .unwrap_or_default();
 
     let dialog = adw::Dialog::builder()
@@ -357,8 +360,8 @@ fn edit_rule(
     page.add(&conditions_group);
 
     let rows: Rc<RefCell<Vec<ConditionRow>>> = Rc::new(RefCell::new(Vec::new()));
-    // Правило без условий поймало бы весь трафик, поэтому у нового правила
-    // сразу есть с чем работать.
+    // A rule without conditions would catch all traffic, so a new rule starts
+    // with something to work with.
     let initial = match rule.conditions.is_empty() {
         true => vec![Condition::default()],
         false => rule.conditions.clone(),
@@ -367,7 +370,7 @@ fn edit_rule(
         add_condition_row(&conditions_group, &rows, condition);
     }
 
-    // Выбор между «любое» и «все» имеет смысл только когда условий несколько.
+    // Choosing between “any” and “all” makes sense only with multiple conditions.
     let sync_mode = {
         let mode = mode.clone();
         let rows = rows.clone();
@@ -420,7 +423,7 @@ fn edit_rule(
                 let mut settings = window.state().settings.borrow_mut();
                 match index {
                     Some(index) if index < settings.route_rules.len() => {
-                        // Состояние переключателя правит список, а не редактор.
+                        // The switch state controls the list, not the editor.
                         let enabled = settings.route_rules[index].enabled;
                         settings.route_rules[index] = RouteRule { enabled, ..edited };
                     }
@@ -440,7 +443,7 @@ fn edit_rule(
     dialog.present(Some(parent));
 }
 
-/// Одно условие в редакторе: тип и значения к нему.
+/// One editor condition: its type and values.
 struct ConditionRow {
     row: adw::ExpanderRow,
     kind: adw::ComboRow,
@@ -448,7 +451,7 @@ struct ConditionRow {
 }
 
 impl ConditionRow {
-    /// Условие в том виде, в каком его сейчас видно в редакторе.
+    /// Condition in the form currently shown by the editor.
     fn read(&self) -> Condition {
         let buffer = self.view.buffer();
         let text = buffer
@@ -456,8 +459,8 @@ impl ConditionRow {
             .to_string();
         let values = text
             .lines()
-            // Значения принимаем и построчно, и через запятую: копируют
-            // их обычно из чужих конфигов, где формат разный.
+            // Accept values both line by line and comma-separated: they are often
+            // copied from other configs with different formatting.
             .flat_map(|line| line.split(','))
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
@@ -517,8 +520,8 @@ fn add_condition_row(
         .build();
     row.add_suffix(&remove);
 
-    // Заголовок обязан следовать за выбранным условием: для процесса и для
-    // подсети вписывают совершенно разное.
+    // The title must follow the selected condition: process and subnet values
+    // are completely different.
     kind.connect_selected_notify({
         let row = row.clone();
         move |combo| {
@@ -533,8 +536,8 @@ fn add_condition_row(
         let rows = rows.clone();
         let row = row.clone();
         move |_| {
-            // Последнее условие не убираем: правило без условий поймало бы
-            // весь трафик, а пустая форма ничего не объясняет.
+            // Do not remove the last condition: a rule without conditions would
+            // catch all traffic, while an empty form explains nothing.
             if rows.borrow().len() < 2 {
                 return;
             }

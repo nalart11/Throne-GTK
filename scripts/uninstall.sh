@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Удаляет установленное; настройки и профили в ~/.config/throne-gtk остаются.
+# Remove the installation; settings and profiles in ~/.config/throne-gtk remain.
 set -euo pipefail
 prefix="${PREFIX:-$HOME/.local}"
 rm -rf "$prefix/lib/throne-gtk"

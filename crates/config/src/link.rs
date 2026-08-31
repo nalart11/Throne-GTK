@@ -1,10 +1,10 @@
-//! Разбор ссылок на серверы в outbound-ы sing-box.
+//! Parsing server links into sing-box outbounds.
 //!
-//! Ссылки в этой экосистеме — фольклор, а не стандарт: один и тот же протокол
-//! кодируют по-разному разные панели. Поэтому парсер намеренно снисходителен —
-//! чинит паддинг base64, принимает и `hy2://`, и `hysteria2://`, переживает
-//! незаэкранированные `#` в именах, — но никогда не угадывает то, от чего
-//! зависит соединение: отсутствующий host, порт или ключ это ошибка.
+//! Links in this ecosystem are folklore, not a standard: the same protocol
+//! is encoded differently by different panels. Therefore the parser is deliberately lenient:
+//! it fixes base64 padding, accepts both `hy2://` and `hysteria2://`, and handles
+//! unescaped `#` in names, but never guesses anything that affects
+//! the connection: a missing host, port, or key is an error.
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
@@ -14,8 +14,8 @@ use serde_json::{json, Map, Value};
 
 use crate::profile::Profile;
 
-/// base64 в ссылках встречается во всех четырёх сочетаниях алфавита и
-/// паддинга — пробуем их по очереди, прежде чем признать строку битой.
+/// Base64 in links appears in all four combinations of alphabet and
+/// padding; try them in turn before declaring the string invalid.
 pub fn decode_b64(s: &str) -> Result<Vec<u8>> {
     let t: String = s.trim().chars().filter(|c| !c.is_whitespace()).collect();
     for engine in [
@@ -30,8 +30,8 @@ pub fn decode_b64(s: &str) -> Result<Vec<u8>> {
     bail!("строка не является корректным base64")
 }
 
-/// Мелкий трейт вместо перечисления типов движков base64: у них разные типы,
-/// а нужен один вызов.
+/// A small trait instead of enumerating base64 engine types: they have different types,
+/// but one call is needed.
 trait Fn2 {
     fn decode2(&self, s: &str) -> Result<Vec<u8>>;
 }
@@ -42,17 +42,15 @@ impl<T: Engine> Fn2 for T {
 }
 
 fn urldecode(s: &str) -> String {
-    percent_decode_str(s)
-        .decode_utf8_lossy()
-        .into_owned()
+    percent_decode_str(s).decode_utf8_lossy().into_owned()
 }
 
-/// Разбитая на части ссылка. Своя, а не `url::Url`: имена профилей регулярно
-/// содержат сырые `#`, `%` и пробелы, на которых строгий парсер ломается,
-/// а панели такие ссылки выдают каждый день.
+/// A link split into parts. This is custom rather than `url::Url`: profile names regularly
+/// contain raw `#`, `%`, and spaces that break a strict parser,
+/// and panels produce such links every day.
 struct Raw<'a> {
     scheme: &'a str,
-    /// Всё между `://` и `?`/`#`.
+    /// Everything between `://` and `?`/`#`.
     body: String,
     query: Vec<(String, String)>,
     fragment: String,
@@ -65,7 +63,7 @@ impl<'a> Raw<'a> {
             .split_once("://")
             .ok_or_else(|| anyhow!("в ссылке нет схемы `протокол://`"))?;
 
-        // Фрагмент отрезаем по первому `#`: имя может содержать что угодно.
+        // Cut the fragment at the first `#`: the name may contain anything.
         let (before_frag, fragment) = match rest.split_once('#') {
             Some((b, f)) => (b, urldecode(f)),
             None => (rest, String::new()),
@@ -108,7 +106,7 @@ impl<'a> Raw<'a> {
         matches!(self.q(key), Some("1" | "true" | "True"))
     }
 
-    /// `user@host:port` → (user, host, port). user может быть пустым.
+    /// `user@host:port` → (user, host, port). user may be empty.
     fn userinfo_host_port(&self) -> Result<(String, String, u16)> {
         let (user, hostport) = match self.body.rsplit_once('@') {
             Some((u, h)) => (urldecode(u), h),
@@ -120,7 +118,7 @@ impl<'a> Raw<'a> {
 }
 
 fn split_host_port(s: &str) -> Result<(String, u16)> {
-    // IPv6 в ссылке всегда в скобках: [::1]:443
+    // IPv6 in a link is always bracketed: [::1]:443
     if let Some(rest) = s.strip_prefix('[') {
         let (host, tail) = rest
             .split_once(']')
@@ -146,8 +144,8 @@ fn parse_port(s: &str) -> Result<u16> {
         .ok_or_else(|| anyhow!("`{s}` не похоже на номер порта"))
 }
 
-/// Разбирает одну ссылку. Имя профиля берётся из фрагмента, а если его нет —
-/// из адреса, чтобы в списке не появлялись безымянные строки.
+/// Parses one link. The profile name is taken from the fragment, or, if absent,
+/// from the address so nameless entries do not appear in the list.
 pub fn parse(link: &str) -> Result<Profile> {
     let link = link.trim();
     let raw = Raw::parse(link)?;
@@ -174,9 +172,9 @@ pub fn parse(link: &str) -> Result<Profile> {
     Ok(profile)
 }
 
-/// Разбирает список ссылок, разделённых переводами строк. Возвращает то, что
-/// удалось разобрать, и ошибки по остальным: одна кривая строка в подписке на
-/// две сотни серверов не должна ронять импорт целиком.
+/// Parses a list of links separated by newlines. Returns what could be parsed
+/// and errors for the rest: one malformed line in a subscription of
+/// two hundred servers should not abort the entire import.
 pub fn parse_many(text: &str) -> (Vec<Profile>, Vec<String>) {
     let mut ok = Vec::new();
     let mut errors = Vec::new();
@@ -201,10 +199,10 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{head}…")
 }
 
-// ── общие куски outbound-а ──────────────────────────────────────────────
+// ── shared outbound components ───────────────────────────────────────────
 
-/// Собирает секцию `tls` из query-параметров v2ray-стиля.
-/// Возвращает `None`, когда шифрования нет.
+/// Builds the `tls` section from v2ray-style query parameters.
+/// Returns `None` when encryption is absent.
 fn tls_from_query(raw: &Raw, default_sni: &str) -> Option<Value> {
     let security = raw.q_or("security", "none");
     let has_reality = raw.q("pbk").is_some();
@@ -214,13 +212,17 @@ fn tls_from_query(raw: &Raw, default_sni: &str) -> Option<Value> {
     Some(build_tls(raw, default_sni, has_reality))
 }
 
-/// То же, но для протоколов, у которых шифрование неотключаемо (trojan, QUIC-овые,
-/// anytls): там `security` в ссылке обычно не пишут вовсе, а `insecure`, `alpn` и
-/// отпечаток — пишут, и терять их нельзя.
+/// The same, but for protocols where encryption cannot be disabled (trojan, QUIC-based,
+/// anytls): `security` is usually omitted from the link, while `insecure`, `alpn`, and
+/// the fingerprint are included and must not be lost.
 fn tls_always(raw: &Raw, default_sni: &str) -> Value {
     let mut tls = build_tls(raw, default_sni, raw.q("pbk").is_some());
     tls["enabled"] = json!(true);
-    if tls.get("server_name").and_then(Value::as_str).unwrap_or("").is_empty()
+    if tls
+        .get("server_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .is_empty()
         && !default_sni.is_empty()
     {
         tls["server_name"] = json!(default_sni);
@@ -229,7 +231,6 @@ fn tls_always(raw: &Raw, default_sni: &str) -> Value {
 }
 
 fn build_tls(raw: &Raw, default_sni: &str, has_reality: bool) -> Value {
-
     let mut tls = Map::new();
     tls.insert("enabled".into(), json!(true));
 
@@ -245,13 +246,19 @@ fn build_tls(raw: &Raw, default_sni: &str, has_reality: bool) -> Value {
         tls.insert("insecure".into(), json!(true));
     }
     if let Some(alpn) = raw.q("alpn") {
-        let list: Vec<&str> = alpn.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let list: Vec<&str> = alpn
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
         if !list.is_empty() {
             tls.insert("alpn".into(), json!(list));
         }
     }
-    // Отпечаток TLS: у reality он обязателен, поэтому подставляем chrome.
-    let fp = raw.q("fp").unwrap_or(if has_reality { "chrome" } else { "" });
+    // TLS fingerprint: reality requires it, so use chrome by default.
+    let fp = raw
+        .q("fp")
+        .unwrap_or(if has_reality { "chrome" } else { "" });
     if !fp.is_empty() {
         tls.insert("utls".into(), json!({"enabled": true, "fingerprint": fp}));
     }
@@ -268,7 +275,7 @@ fn build_tls(raw: &Raw, default_sni: &str, has_reality: bool) -> Value {
     Value::Object(tls)
 }
 
-/// Секция `transport`. `None` — обычный TCP без обёртки.
+/// The `transport` section. `None` means ordinary TCP without a wrapper.
 fn transport_from_query(raw: &Raw) -> Option<Value> {
     let kind = raw.q_or("type", "tcp");
     let host = raw.q_or("host", "");
@@ -277,7 +284,7 @@ fn transport_from_query(raw: &Raw) -> Option<Value> {
     match kind {
         "ws" => {
             let mut t = json!({"type": "ws"});
-            // Панели кладут ранний data в путь: /path?ed=2048
+            // Panels put early data in the path: /path?ed=2048
             let (p, ed) = match path.split_once("?ed=") {
                 Some((p, ed)) => (p, ed.parse::<u32>().ok()),
                 None => (path, None),
@@ -310,7 +317,7 @@ fn transport_from_query(raw: &Raw) -> Option<Value> {
             }
             Some(t)
         }
-        // xhttp умеет только Xray; тег протокола профиля переключается выше.
+        // xhttp is supported only by Xray; the profile protocol tag is switched above.
         "xhttp" | "splithttp" => {
             let mut t = json!({"type": "xhttp", "path": path, "mode": raw.q_or("mode", "auto")});
             if !host.is_empty() {
@@ -333,7 +340,7 @@ fn insert_opt(obj: &mut Map<String, Value>, key: &str, value: Option<Value>) {
     }
 }
 
-// ── протоколы ───────────────────────────────────────────────────────────
+// ── protocols ────────────────────────────────────────────────────────────
 
 fn parse_vless(raw: &Raw) -> Result<Profile> {
     let (uuid, host, port) = raw.userinfo_host_port()?;
@@ -350,9 +357,9 @@ fn parse_vless(raw: &Raw) -> Result<Profile> {
     if !flow.is_empty() {
         o.insert("flow".into(), json!(flow));
     }
-    // xudp даёт рабочий UDP там, где иначе он молча не поедет.
+    // xudp provides working UDP where it would otherwise silently fail.
     o.insert("packet_encoding".into(), json!("xudp"));
-    insert_opt(&mut o, "tls", tls_from_query(raw, &raw.q_or("sni", "")));
+    insert_opt(&mut o, "tls", tls_from_query(raw, raw.q_or("sni", "")));
     let transport = transport_from_query(raw);
     let is_xhttp = matches!(raw.q_or("type", "tcp"), "xhttp" | "splithttp");
     insert_opt(&mut o, "transport", transport);
@@ -364,8 +371,8 @@ fn parse_vless(raw: &Raw) -> Result<Profile> {
     Ok(p)
 }
 
-/// vmess://<base64 от JSON v2rayN>. Числа в этом JSON бывают и строками —
-/// отсюда `as_u16`/`as_u32` вместо прямого чтения полей.
+/// vmess://<base64 of v2rayN JSON>. Numbers in this JSON may also be strings,
+/// hence `as_u16`/`as_u32` instead of reading fields directly.
 fn parse_vmess(link: &str) -> Result<Profile> {
     let payload = link.trim_start_matches("vmess://");
     let decoded = decode_b64(payload).context("тело vmess-ссылки")?;
@@ -408,8 +415,8 @@ fn parse_vmess(link: &str) -> Result<Profile> {
     o.insert("security".into(), json!(security));
     o.insert("packet_encoding".into(), json!("xudp"));
 
-    // Транспорт и TLS в vmess-JSON описаны своими ключами — переводим их
-    // в тот же вид query-параметров, который понимает общий код.
+    // Transport and TLS in vmess JSON use their own keys; convert them
+    // to the same query-parameter form understood by the shared code.
     let net = as_str("net");
     let tls_mode = as_str("tls");
     let sni = match as_str("sni") {
@@ -452,14 +459,14 @@ fn parse_trojan(raw: &Raw) -> Result<Profile> {
     o.insert("server".into(), json!(host.clone()));
     o.insert("server_port".into(), json!(port));
     o.insert("password".into(), json!(password));
-    // У trojan шифрование включено всегда, даже если `security` не передали.
+    // Trojan encryption is always enabled, even when `security` is omitted.
     o.insert("tls".into(), tls_always(raw, &host));
     insert_opt(&mut o, "transport", transport_from_query(raw));
     Profile::from_outbound(Value::Object(o))
 }
 
-/// Два несовместимых формата под одной схемой: SIP002 (`ss://base64(method:pass)@host:port`)
-/// и старый целиком-base64 (`ss://base64(method:pass@host:port)`).
+/// Two incompatible formats under one scheme: SIP002 (`ss://base64(method:pass)@host:port`)
+/// and the old fully base64-encoded format (`ss://base64(method:pass@host:port)`).
 fn parse_shadowsocks(raw: &Raw) -> Result<Profile> {
     let (method, password, host, port) = match raw.body.rsplit_once('@') {
         Some((userinfo, hostport)) => {
@@ -523,7 +530,7 @@ fn parse_hysteria2(raw: &Raw) -> Result<Profile> {
             o.insert(field.into(), json!(v));
         }
     }
-    // QUIC без TLS не бывает — включаем, даже если в ссылке про него молчат.
+    // QUIC cannot work without TLS; enable it even if the link omits it.
     o.insert("tls".into(), tls_always(raw, &host));
     Profile::from_outbound(Value::Object(o))
 }
@@ -554,9 +561,9 @@ fn parse_tuic(raw: &Raw) -> Result<Profile> {
 
 fn parse_socks(raw: &Raw) -> Result<Profile> {
     let (userinfo, host, port) = raw.userinfo_host_port()?;
-    // socks://base64(user:pass)@host:port тоже встречается
+    // socks://base64(user:pass)@host:port also occurs.
     let userinfo = match decode_b64(&userinfo) {
-        Ok(bytes) if userinfo.contains(':') == false && !userinfo.is_empty() => {
+        Ok(bytes) if !userinfo.contains(':') && !userinfo.is_empty() => {
             String::from_utf8(bytes).unwrap_or(userinfo)
         }
         _ => userinfo,
@@ -596,12 +603,11 @@ fn parse_http(raw: &Raw, tls: bool) -> Result<Profile> {
     Profile::from_outbound(Value::Object(o))
 }
 
-/// naive+https:// и naive+quic://. Шифрование включено всегда, порт по
-/// умолчанию 443: панели его обычно не пишут.
+/// naive+https:// and naive+quic://. Encryption is always enabled; the port defaults to
+/// 443 because panels usually omit it.
 fn parse_naive(raw: &Raw) -> Result<Profile> {
     let (userinfo, host, port) = match raw.userinfo_host_port() {
         Ok(parts) => parts,
-        // Порт не указан — берём 443, как это делает сам naive.
         Err(_) => {
             let (user, hostport) = match raw.body.rsplit_once('@') {
                 Some((u, h)) => (urldecode(u), h.to_string()),
@@ -681,8 +687,9 @@ mod tests {
 
     #[test]
     fn vless_xhttp_is_marked_for_xray() {
-        let p = parse("vless://uuid@a.example:443?type=xhttp&security=tls&path=%2Fx&mode=packet-up#x")
-            .unwrap();
+        let p =
+            parse("vless://uuid@a.example:443?type=xhttp&security=tls&path=%2Fx&mode=packet-up#x")
+                .unwrap();
         assert_eq!(p.kind, "xrayvless");
         assert_eq!(p.outbound["transport"]["type"], "xhttp");
         assert_eq!(p.outbound["transport"]["mode"], "packet-up");
@@ -733,7 +740,8 @@ mod tests {
 
     #[test]
     fn tuic_splits_uuid_and_password() {
-        let p = parse("tuic://uuid-here:pass-here@t.example:443?congestion_control=cubic#t").unwrap();
+        let p =
+            parse("tuic://uuid-here:pass-here@t.example:443?congestion_control=cubic#t").unwrap();
         assert_eq!(p.outbound["uuid"], "uuid-here");
         assert_eq!(p.outbound["password"], "pass-here");
         assert_eq!(p.outbound["congestion_control"], "cubic");

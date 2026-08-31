@@ -1,10 +1,10 @@
-//! Мост в Xray-ядро.
+//! Bridge to the Xray core.
 //!
-//! XHTTP умеет только Xray, а весь вход, DNS и маршрутизация живут в sing-box.
-//! Поэтому такой профиль исполняется так: sing-box дозванивается в локальный
-//! socks-вход Xray, а тот уже идёт на сервер. Порт держится на loopback и
-//! закрыт логином с паролем — иначе любой процесс в системе получил бы
-//! открытый прокси.
+//! XHTTP is supported only by Xray, while all inbounds, DNS, and routing live in sing-box.
+//! Such a profile is therefore executed as follows: sing-box connects to a local
+//! Xray SOCKS inbound, which then connects to the server. The port is bound to loopback and
+//! protected by a username and password; otherwise any process on the system would get
+//! an open proxy.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Map, Value};
@@ -13,14 +13,14 @@ use uuid::Uuid;
 use crate::profile::Profile;
 use crate::settings::Settings;
 
-/// Один профиль, вынесенный в Xray, вместе с параметрами моста.
+/// A profile moved to Xray, together with the bridge parameters.
 #[derive(Debug, Clone)]
 pub struct Bridge {
-    /// Тег, под которым профиль виден в sing-box и в ответах ядра.
+    /// The tag under which the profile is visible in sing-box and core responses.
     pub tag: String,
     pub port: u16,
     pub auth: String,
-    /// Готовый outbound в формате Xray.
+    /// Ready outbound in Xray format.
     pub outbound: Value,
 }
 
@@ -34,7 +34,7 @@ impl Bridge {
         })
     }
 
-    /// Как этот профиль выглядит для sing-box.
+    /// How this profile appears to sing-box.
     pub fn socks_outbound(&self) -> Value {
         json!({
             "type": "socks",
@@ -67,17 +67,16 @@ impl Bridge {
     }
 }
 
-/// Свободный порт на loopback. Между освобождением и тем, как Xray его займёт,
-/// есть окно; оно же есть у оригинального Throne, и на практике порт успевает
-/// достаться нам.
+/// A free loopback port. There is a window between releasing it and Xray taking it,
+/// as with the original Throne, and in practice the port is acquired by us in time.
 fn free_port() -> Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .context("не удалось занять локальный порт под мост в Xray")?;
     Ok(listener.local_addr()?.port())
 }
 
-/// Полный конфиг Xray для набора мостов: у каждого свой вход, свой выход и
-/// правило, связывающее их.
+/// Complete Xray configuration for a set of bridges: each has its own inbound, outbound, and
+/// rule connecting them.
 pub fn build_config(bridges: &[Bridge], settings: &Settings) -> Result<String> {
     if bridges.is_empty() {
         bail!("нет ни одного профиля для Xray");
@@ -109,12 +108,12 @@ fn xray_log_level(level: &str) -> &'static str {
     }
 }
 
-/// Перевод outbound-а в форму Xray.
+/// Converts an outbound to Xray format.
 ///
-/// Профиль, уже записанный по-Xray, отдаётся как есть — переписывать его
-/// нельзя: расширения вроде `xmux` и `downloadSettings` в форме sing-box не
-/// выражаются, и перевод туда-обратно их бы потерял. Остальное переводится из
-/// формы sing-box; поддержан vless — именно он приезжает с XHTTP.
+/// A profile already stored in Xray format is returned as is; rewriting it
+/// is forbidden: extensions such as `xmux` and `downloadSettings` have no
+/// sing-box representation and would be lost in a round trip. Everything else is converted from
+/// sing-box format; vless is supported because it is what arrives with XHTTP.
 pub fn to_xray_outbound(profile: &Profile, tag: &str) -> Result<Value> {
     if profile.is_xray_native() {
         let mut out = profile.outbound.clone();
@@ -141,7 +140,11 @@ pub fn to_xray_outbound(profile: &Profile, tag: &str) -> Result<Value> {
         .ok_or_else(|| anyhow!("в профиле нет UUID"))?;
 
     let mut user = json!({"id": uuid, "encryption": "none"});
-    if let Some(flow) = o.get("flow").and_then(Value::as_str).filter(|f| !f.is_empty()) {
+    if let Some(flow) = o
+        .get("flow")
+        .and_then(Value::as_str)
+        .filter(|f| !f.is_empty())
+    {
         user["flow"] = json!(flow);
     }
 
@@ -172,7 +175,11 @@ fn stream_settings(o: &Map<String, Value>) -> Value {
                 "path": t.get("path").and_then(Value::as_str).unwrap_or("/"),
                 "mode": t.get("mode").and_then(Value::as_str).unwrap_or("auto"),
             });
-            if let Some(host) = t.get("host").and_then(Value::as_str).filter(|h| !h.is_empty()) {
+            if let Some(host) = t
+                .get("host")
+                .and_then(Value::as_str)
+                .filter(|h| !h.is_empty())
+            {
                 x["host"] = json!(host);
             }
             if let Some(extra) = t.get("extra") {
@@ -288,7 +295,10 @@ mod tests {
             serde_json::from_str(&build_config(&[bridge.clone()], &Settings::default()).unwrap())
                 .unwrap();
         assert_eq!(config["inbounds"][0]["port"], bridge.port);
-        assert_eq!(config["inbounds"][0]["settings"]["accounts"][0]["user"], bridge.auth);
+        assert_eq!(
+            config["inbounds"][0]["settings"]["accounts"][0]["user"],
+            bridge.auth
+        );
         assert_eq!(config["routing"]["rules"][0]["inboundTag"][0], "proxy-in");
         assert_eq!(config["routing"]["rules"][0]["outboundTag"], "proxy");
     }
@@ -303,8 +313,10 @@ mod tests {
 
     #[test]
     fn plain_tls_without_reality() {
-        let p = link::parse("vless://uuid@w.example:443?type=xhttp&security=tls&sni=w.example&alpn=h2#w")
-            .unwrap();
+        let p = link::parse(
+            "vless://uuid@w.example:443?type=xhttp&security=tls&sni=w.example&alpn=h2#w",
+        )
+        .unwrap();
         let ss = to_xray_outbound(&p, "proxy").unwrap()["streamSettings"].clone();
         assert_eq!(ss["security"], "tls");
         assert_eq!(ss["tlsSettings"]["serverName"], "w.example");
@@ -325,7 +337,7 @@ mod tests {
         .unwrap();
         let out = to_xray_outbound(&p, "proxy").unwrap();
         assert_eq!(out["tag"], "proxy");
-        // Расширение, которого нет в форме sing-box, обязано уцелеть.
+        // An extension absent from sing-box format must survive.
         assert_eq!(
             out["streamSettings"]["xhttpSettings"]["extra"]["xmux"]["maxConnections"],
             "1-1"
