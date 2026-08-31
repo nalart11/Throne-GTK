@@ -53,6 +53,8 @@ pub enum Command {
         gid: i64,
         url: String,
         user_agent: String,
+        send_hwid: bool,
+        custom_hwid_params: String,
     },
     /// Проверить, что конфиг вообще собирается и принимается ядром.
     CheckConfig {
@@ -76,7 +78,10 @@ pub enum Status {
 pub enum Event {
     Status(Status),
     /// Байты за последний интервал: скорость считается интерфейсом.
-    Traffic { down: i64, up: i64 },
+    Traffic {
+        down: i64,
+        up: i64,
+    },
     Connections(Vec<Connection>),
     /// Состояние автовыбора: кто выбран сейчас и сколько серверов живо.
     AutoStatus {
@@ -86,11 +91,19 @@ pub enum Event {
         total: i32,
         suspended: bool,
     },
-    LatencyResult { id: i64, latency: i32 },
-    TestFinished { tested: usize },
+    LatencyResult {
+        id: i64,
+        latency: i32,
+    },
+    TestFinished {
+        tested: usize,
+    },
     /// Промежуточное состояние замера: ядро отдаёт его по запросу, пока идёт
     /// прогон, — иначе минуту непонятно, жив ли замер.
-    SpeedProgress { id: i64, stage: String },
+    SpeedProgress {
+        id: i64,
+        stage: String,
+    },
     SpeedResult {
         id: i64,
         download: String,
@@ -128,7 +141,11 @@ pub struct Engine {
 impl Engine {
     /// Поднимает рабочий поток с собственным исполнителем tokio.
     /// `events` — сторона отправки; интерфейс держит приёмник.
-    pub fn start(core_bin: PathBuf, runtime_dir: PathBuf, events: async_channel::Sender<Event>) -> Self {
+    pub fn start(
+        core_bin: PathBuf,
+        runtime_dir: PathBuf,
+        events: async_channel::Sender<Event>,
+    ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         std::thread::Builder::new()
             .name("throne-engine".into())
@@ -311,10 +328,21 @@ async fn run(
                             let _ = r.core.client.stop_test().await;
                         }
                     }
-                    Command::FetchSubscription { gid, url, user_agent } => {
+                    Command::FetchSubscription {
+                        gid,
+                        url,
+                        user_agent,
+                        send_hwid,
+                        custom_hwid_params,
+                    } => {
                         let events = events.clone();
                         tokio::spawn(async move {
-                            let result = fetch_subscription(&url, &user_agent)
+                            let result = fetch_subscription(
+                                &url,
+                                &user_agent,
+                                send_hwid,
+                                &custom_hwid_params,
+                            )
                                 .await
                                 .map_err(|e| format!("{e:#}"));
                             let _ = events.send(Event::Subscription { gid, result }).await;
@@ -493,7 +521,10 @@ async fn check_config(
 ) -> Result<()> {
     let generated = throne_config::generate(profile, settings).context("сборка конфига")?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
-    let outcome = core.client.check_config(load_request(&generated, settings)).await;
+    let outcome = core
+        .client
+        .check_config(load_request(&generated, settings))
+        .await;
     core.shutdown().await;
     outcome
 }
@@ -510,7 +541,8 @@ async fn test_latency(
         let _ = events.send(Event::TestFinished { tested: 0 }).await;
         return Ok(());
     }
-    let generated = throne_config::generate_test(&profiles, settings).context("сборка конфига теста")?;
+    let generated =
+        throne_config::generate_test(&profiles, settings).context("сборка конфига теста")?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
 
     let request = pb::TestReq {
@@ -530,7 +562,11 @@ async fn test_latency(
     if let Ok(response) = &outcome {
         for result in &response.results {
             // Тег вида `p-<индекс>` привязывает результат к строке списка.
-            let Some(index) = generated.tags.iter().position(|t| t == result.outbound_tag()) else {
+            let Some(index) = generated
+                .tags
+                .iter()
+                .position(|t| t == result.outbound_tag())
+            else {
                 continue;
             };
             let Some(&id) = ids.get(index) else { continue };
@@ -588,7 +624,9 @@ async fn speed_test(
                 if !state.is_running() {
                     continue;
                 }
-                let Some(result) = &state.result else { continue };
+                let Some(result) = &state.result else {
+                    continue;
+                };
                 let stage = if !result.dl_speed().is_empty() {
                     format!("приём {}", result.dl_speed())
                 } else if !result.server_name().is_empty() {
@@ -625,8 +663,14 @@ async fn speed_test(
     Ok(())
 }
 
-async fn fetch_subscription(url: &str, user_agent: &str) -> Result<subscription::Parsed> {
-    let (body, userinfo) = subscription::fetch(url, user_agent, 30).await?;
+async fn fetch_subscription(
+    url: &str,
+    user_agent: &str,
+    send_hwid: bool,
+    custom_hwid_params: &str,
+) -> Result<subscription::Parsed> {
+    let (body, userinfo) =
+        subscription::fetch(url, user_agent, 30, send_hwid, custom_hwid_params).await?;
     let mut parsed = subscription::parse(&body)?;
     if !userinfo.is_empty() {
         parsed.info = subscription::format_userinfo(&userinfo);

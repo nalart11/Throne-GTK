@@ -134,6 +134,8 @@ pub struct Settings {
     pub sub_auto_update: bool,
     pub sub_auto_update_minutes: i64,
     pub sub_user_agent: String,
+    pub sub_send_hwid: bool,
+    pub sub_custom_hwid_params: String,
 
     /// Куда ядро складывает свой кэш. Не сохраняется в базу: это свойство
     /// установки, а не настройка — приложение проставляет путь при запуске,
@@ -197,6 +199,8 @@ impl Default for Settings {
             sub_auto_update: false,
             sub_auto_update_minutes: 360,
             sub_user_agent: concat!("throne-gtk/", env!("CARGO_PKG_VERSION")).into(),
+            sub_send_hwid: false,
+            sub_custom_hwid_params: String::new(),
 
             cache_file: String::new(),
 

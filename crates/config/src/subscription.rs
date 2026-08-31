@@ -6,7 +6,9 @@
 //! половины панелей `text/plain` независимо от того, что внутри.
 
 use anyhow::{bail, Context, Result};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::link;
@@ -24,13 +26,22 @@ pub struct Parsed {
 
 /// Скачивает тело подписки. Возвращает вместе с ним содержимое заголовка
 /// `subscription-userinfo` — трафик и срок, которые панели кладут только туда.
-pub async fn fetch(url: &str, user_agent: &str, timeout_secs: u64) -> Result<(String, String)> {
+pub async fn fetch(
+    url: &str,
+    user_agent: &str,
+    timeout_secs: u64,
+    send_hwid: bool,
+    custom_hwid_params: &str,
+) -> Result<(String, String)> {
     let client = reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(Duration::from_secs(timeout_secs))
         .build()?;
-    let resp = client
-        .get(url)
+    let mut request = client.get(url);
+    if send_hwid {
+        request = request.headers(hwid_headers(custom_hwid_params)?);
+    }
+    let resp = request
         .send()
         .await
         .with_context(|| format!("запрос к {url}"))?;
@@ -47,6 +58,113 @@ pub async fn fetch(url: &str, user_agent: &str, timeout_secs: u64) -> Result<(St
     }
     let body = resp.text().await.context("чтение тела подписки")?;
     Ok((body, userinfo))
+}
+
+/// Headers used by subscription servers to identify the device.  Custom values
+/// are merged with the platform values, so an omitted custom key keeps the
+/// automatic value.
+pub fn hwid_headers(custom_params: &str) -> Result<HeaderMap> {
+    let mut values = automatic_hwid();
+    if !custom_params.is_empty() {
+        for (key, value) in parse_custom_hwid_params(custom_params)? {
+            values.insert(key, value);
+        }
+    }
+
+    let mut headers = HeaderMap::new();
+    for (key, header_name) in [
+        ("hwid", "x-hwid"),
+        ("os", "x-device-os"),
+        ("osversion", "x-ver-os"),
+        ("model", "x-device-model"),
+    ] {
+        if let Some(value) = values.get(key).filter(|value| !value.is_empty()) {
+            headers.insert(
+                HeaderName::from_static(header_name),
+                HeaderValue::from_str(value)?,
+            );
+        }
+    }
+    Ok(headers)
+}
+
+fn parse_custom_hwid_params(params: &str) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for item in params.split(',') {
+        let Some((key, value)) = item.split_once('=') else {
+            continue;
+        };
+        let key = key.to_ascii_lowercase();
+        if !matches!(key.as_str(), "hwid" | "os" | "osversion" | "model")
+            || key.is_empty()
+            || value.is_empty()
+            || value.contains(['\r', '\n'])
+            || value.chars().count() >= 1000
+        {
+            continue;
+        }
+        result.insert(key, value.to_string());
+    }
+    Ok(result)
+}
+
+fn automatic_hwid() -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    values.insert("hwid".into(), machine_id());
+    values.insert("os".into(), device_os());
+    values.insert("osversion".into(), os_version());
+    values.insert("model".into(), device_model());
+    values
+}
+
+#[cfg(target_os = "linux")]
+fn machine_id() -> String {
+    std::fs::read_to_string("/etc/machine-id")
+        .or_else(|_| std::fs::read_to_string("/var/lib/dbus/machine-id"))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn machine_id() -> String {
+    String::new()
+}
+
+#[cfg(target_os = "linux")]
+fn device_os() -> String {
+    "Linux".into()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn device_os() -> String {
+    std::env::consts::OS.into()
+}
+
+#[cfg(target_os = "linux")]
+fn os_version() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn os_version() -> String {
+    String::new()
+}
+
+#[cfg(target_os = "linux")]
+fn device_model() -> String {
+    std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn device_model() -> String {
+    String::new()
 }
 
 /// Разбирает тело подписки в любом из известных форматов.
@@ -126,7 +244,10 @@ fn parse_json(v: &Value) -> Parsed {
     for ob in outbounds {
         // Служебные outbound-ы конфига — не серверы.
         let kind = ob.get("type").and_then(Value::as_str).unwrap_or("");
-        if matches!(kind, "direct" | "block" | "dns" | "selector" | "urltest" | "") {
+        if matches!(
+            kind,
+            "direct" | "block" | "dns" | "selector" | "urltest" | ""
+        ) {
             continue;
         }
         match Profile::from_outbound(ob) {
@@ -184,8 +305,7 @@ fn yn(v: &serde_yaml_ng::Value, key: &str) -> Option<u64> {
 }
 
 fn yb(v: &serde_yaml_ng::Value, key: &str) -> bool {
-    matches!(v.get(key), Some(serde_yaml_ng::Value::Bool(true)))
-        || ys(v, key) == "true"
+    matches!(v.get(key), Some(serde_yaml_ng::Value::Bool(true))) || ys(v, key) == "true"
 }
 
 fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
@@ -479,9 +599,28 @@ proxies:
 
     #[test]
     fn userinfo_header_is_humanised() {
-        let s = format_userinfo("upload=1073741824; download=1073741824; total=107374182400; expire=1801607400");
+        let s = format_userinfo(
+            "upload=1073741824; download=1073741824; total=107374182400; expire=1801607400",
+        );
         assert!(s.starts_with("2.0 ГиБ из 100.0 ГиБ"), "{s}");
         assert!(s.contains("до 2027-"), "{s}");
+    }
+
+    #[test]
+    fn custom_hwid_params_override_automatic_values() {
+        let headers = hwid_headers("HWID=custom,os=Android,osVersion=13,model=Phone").unwrap();
+        assert_eq!(headers["x-hwid"], "custom");
+        assert_eq!(headers["x-device-os"], "Android");
+        assert_eq!(headers["x-ver-os"], "13");
+        assert_eq!(headers["x-device-model"], "Phone");
+    }
+
+    #[test]
+    fn custom_hwid_params_ignore_invalid_values() {
+        for params in ["unknown=value", "hwid=", "hwid=a\n", "hwid=a,bad"] {
+            assert!(hwid_headers(params).is_ok(), "rejected {params:?}");
+        }
+        assert!(hwid_headers(&format!("hwid={}", "x".repeat(1000))).is_ok());
     }
 
     #[test]

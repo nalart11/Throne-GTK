@@ -7,8 +7,8 @@ use adw::prelude::*;
 use crate::engine::Command;
 use crate::paths;
 use crate::ui::Window;
-use throne_config::profile::Group;
 use throne_config::link;
+use throne_config::profile::Group;
 
 /// Одно окно на оба способа добавления: вставить ссылки или подписаться.
 /// Разделены заголовками, а не вкладками — выбор очевиден по тому, что у
@@ -30,7 +30,9 @@ pub fn add_dialog(window: &Rc<Window>) {
     // ── ссылки ──────────────────────────────────────────────────────────
     let links_group = adw::PreferencesGroup::builder()
         .title("Вставить ссылки")
-        .description("По одной в строке: vless://, vmess://, trojan://, ss://, hysteria2://, tuic://")
+        .description(
+            "По одной в строке: vless://, vmess://, trojan://, ss://, hysteria2://, tuic://",
+        )
         .build();
 
     let view = gtk::TextView::builder()
@@ -64,9 +66,7 @@ pub fn add_dialog(window: &Rc<Window>) {
         .build();
 
     let url_row = adw::EntryRow::builder().title("Адрес подписки").build();
-    let name_row = adw::EntryRow::builder()
-        .title("Название группы")
-        .build();
+    let name_row = adw::EntryRow::builder().title("Название группы").build();
     sub_group.add(&url_row);
     sub_group.add(&name_row);
 
@@ -157,6 +157,13 @@ pub fn add_dialog(window: &Rc<Window>) {
                 gid,
                 url,
                 user_agent: window.state().settings.borrow().sub_user_agent.clone(),
+                send_hwid: window.state().settings.borrow().sub_send_hwid,
+                custom_hwid_params: window
+                    .state()
+                    .settings
+                    .borrow()
+                    .sub_custom_hwid_params
+                    .clone(),
             });
             dialog.close();
             window.toast("Загружаю подписку…");
@@ -180,6 +187,13 @@ pub fn update_subscription(window: &Rc<Window>) {
         gid,
         url: group.url,
         user_agent: window.state().settings.borrow().sub_user_agent.clone(),
+        send_hwid: window.state().settings.borrow().sub_send_hwid,
+        custom_hwid_params: window
+            .state()
+            .settings
+            .borrow()
+            .sub_custom_hwid_params
+            .clone(),
     });
     window.toast("Обновляю подписку…");
 }
@@ -208,7 +222,11 @@ pub fn import_dialog(window: &Rc<Window>) {
             if response != "import" {
                 return;
             }
-            let outcome = window.state().store.borrow_mut().import_throne(&paths::throne_database());
+            let outcome = window
+                .state()
+                .store
+                .borrow_mut()
+                .import_throne(&paths::throne_database());
             match outcome {
                 Ok(done) => {
                     // Правила импорт кладёт прямо в базу — окну надо их

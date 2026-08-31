@@ -110,7 +110,12 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
         .title("Сетевой стек")
         .subtitle("Смешанный подходит в большинстве случаев")
         .model(&gtk::StringList::new(&stacks))
-        .selected(stack_values.iter().position(|s| *s == settings.tun_stack).unwrap_or(0) as u32)
+        .selected(
+            stack_values
+                .iter()
+                .position(|s| *s == settings.tun_stack)
+                .unwrap_or(0) as u32,
+        )
         .build();
     stack.connect_selected_notify({
         let window = window.clone();
@@ -171,7 +176,9 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
     let group = adw::PreferencesGroup::builder()
         .title("Окно")
-        .description("Значок в трее рисует панель рабочего стола; без неё окно закрывается как обычно")
+        .description(
+            "Значок в трее рисует панель рабочего стола; без неё окно закрывается как обычно",
+        )
         .build();
 
     let to_tray = adw::SwitchRow::builder()
@@ -259,7 +266,13 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     });
     group.add(&direct);
 
-    let strategies = ["Как есть", "Сначала IPv4", "Сначала IPv6", "Только IPv4", "Только IPv6"];
+    let strategies = [
+        "Как есть",
+        "Сначала IPv4",
+        "Сначала IPv6",
+        "Только IPv4",
+        "Только IPv6",
+    ];
     let strategy_values = [
         DomainStrategy::AsIs,
         DomainStrategy::PreferIpv4,
@@ -301,7 +314,9 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&fakedns);
     page.add(&group);
 
-    let group = adw::PreferencesGroup::builder().title("Маршрутизация").build();
+    let group = adw::PreferencesGroup::builder()
+        .title("Маршрутизация")
+        .build();
 
     let bypass = adw::SwitchRow::builder()
         .title("Локальные адреса мимо прокси")
@@ -338,7 +353,9 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&rules);
     page.add(&group);
 
-    let group = adw::PreferencesGroup::builder().title("Проверка серверов").build();
+    let group = adw::PreferencesGroup::builder()
+        .title("Проверка серверов")
+        .build();
 
     let url = adw::EntryRow::builder()
         .title("Адрес для проверки")
@@ -576,7 +593,12 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     let level = adw::ComboRow::builder()
         .title("Подробность")
         .model(&gtk::StringList::new(&levels))
-        .selected(levels.iter().position(|l| *l == settings.log_level).unwrap_or(2) as u32)
+        .selected(
+            levels
+                .iter()
+                .position(|l| *l == settings.log_level)
+                .unwrap_or(2) as u32,
+        )
         .build();
     level.connect_selected_notify({
         let window = window.clone();
@@ -635,6 +657,34 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
         }
     });
     group.add(&agent);
+
+    let send_hwid = adw::SwitchRow::builder()
+        .title("Отправлять HWID при обновлении")
+        .subtitle("Помогает подписке связать обновление с этим устройством")
+        .active(settings.sub_send_hwid)
+        .build();
+    send_hwid.connect_active_notify({
+        let window = window.clone();
+        move |row| {
+            let value = row.is_active();
+            edit(&window, |s| s.sub_send_hwid = value);
+        }
+    });
+    group.add(&send_hwid);
+
+    let custom_hwid = adw::EntryRow::builder()
+        .title("Параметры HWID (необязательно)")
+        .tooltip_text("Формат: hwid=...,os=...,osVersion=...,model=...")
+        .text(&settings.sub_custom_hwid_params)
+        .build();
+    custom_hwid.connect_changed({
+        let window = window.clone();
+        move |row| {
+            let value = row.text().to_string();
+            edit(&window, |s| s.sub_custom_hwid_params = value);
+        }
+    });
+    group.add(&custom_hwid);
     page.add(&group);
 
     page
