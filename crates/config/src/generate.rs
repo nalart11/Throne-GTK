@@ -244,6 +244,7 @@ fn inbounds_section(settings: &Settings) -> Value {
             "address": address,
             "mtu": settings.tun_mtu,
             "auto_route": true,
+            "auto_redirect": true,
             "strict_route": settings.tun_strict_route,
             "stack": settings.tun_stack.as_str(),
         }));
@@ -394,7 +395,8 @@ fn route_section(settings: &Settings, for_test: bool) -> Result<Value> {
         }
         for name in rule.rule_sets() {
             if declared.insert(name.clone()) {
-                if let Some(declaration) = crate::route::rule_set_declaration(&name) {
+                let detour = if for_test { tags::DIRECT } else { tags::PROXY };
+                if let Some(declaration) = crate::route::rule_set_declaration(&name, detour) {
                     rule_sets.push(declaration);
                 }
             }
@@ -424,7 +426,8 @@ fn route_section(settings: &Settings, for_test: bool) -> Result<Value> {
         }));
         // Через ту же обвязку, что и списки из правил: адрес зеркала должен
         // быть один на весь конфиг.
-        if let Some(declaration) = crate::route::rule_set_declaration("geosite-private") {
+        let detour = if for_test { tags::DIRECT } else { tags::PROXY };
+        if let Some(declaration) = crate::route::rule_set_declaration("geosite-private", detour) {
             rule_sets.push(declaration);
         }
     }
@@ -493,6 +496,7 @@ mod tests {
         assert_eq!(tun["address"][0], "172.19.0.1/30");
         assert_eq!(tun["stack"], "mixed");
         assert_eq!(tun["auto_route"], true);
+        assert_eq!(tun["auto_redirect"], true);
         assert_eq!(v["route"]["auto_detect_interface"], true);
     }
 
