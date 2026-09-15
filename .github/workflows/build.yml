@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE: "1"
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.0
+          cache-dependency-path: core/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libgtk-4-dev libadwaita-1-dev protobuf-compiler just
+      - name: Test
+        run: just test
+      - name: Build release binaries
+        run: just build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: throne-gtk-linux-x86_64
+          path: build/
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.0
+          cache-dependency-path: core/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: brew install libadwaita protobuf just dylibbundler librsvg
+      - name: Test
+        run: just test
+      - name: Build DMG
+        run: just dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: throne-gtk-macos-${{ runner.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Preserve LF line endings
+        shell: bash
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.0
+          cache-dependency-path: core/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-gnu
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          suppress-deprecation-warnings: msystem-mingw64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-libadwaita
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-protobuf
+            mingw-w64-x86_64-just
+      - name: Test
+        shell: msys2 {0}
+        run: just test
+      - name: Build release binaries
+        shell: msys2 {0}
+        run: just build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: throne-gtk-windows-x86_64
+          path: build/
+          if-no-files-found: error

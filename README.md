@@ -6,7 +6,7 @@ libadwaita вместо Qt. Ядро — то же самое: sing-box 1.13 и 
 
 ## Что это
 
-Клиент прокси для Linux. Поддерживает VLESS (включая Reality и XTLS Vision),
+Кроссплатформенный клиент прокси для Linux, macOS и Windows. Поддерживает VLESS (включая Reality и XTLS Vision),
 VMess, Trojan, Shadowsocks, Hysteria2, TUIC, AnyTLS, Naive, SOCKS и HTTP;
 профили с транспортом XHTTP исполняются Xray через локальный мост, всё
 остальное — sing-box. Работает в двух режимах: локальный прокси на порту или
@@ -27,7 +27,7 @@ throne-gtk (Rust, GTK4)                 throne-gtk-core (Go)
   ├─ crates/app      интерфейс            sing-box 1.13.16
   ├─ crates/store    SQLite: профили      Xray-core 26.7.28
   ├─ crates/config   конфиг sing-box
-  └─ crates/ipc      связь с ядром  ─────► unix-сокет, protobuf
+  └─ crates/ipc      связь с ядром  ─────► Unix-сокет / Windows named pipe, protobuf
 ```
 
 Ядро не слушает сокет само: оно подключается к сокету интерфейса и проверяет,
@@ -40,7 +40,7 @@ sing-box начинает работать без изменений в коде
 
 ## Сборка
 
-Нужны: Rust, Go, protoc, GTK4 ≥ 4.12, libadwaita ≥ 1.5.
+Нужны: Rust, Go, protoc, GTK4 ≥ 4.12, libadwaita ≥ 1.5 и `just`.
 
 Ядро собирается Go 1.26: в Go 1.27 линковка падает на `//go:linkname`-хаках
 sing-box и sing-trusttunnel к внутренностям `golang.org/x/net/http2` (нужный
@@ -53,20 +53,93 @@ just run-app            # отладочный запуск
 just test           # тесты
 ```
 
-Без `just`:
+Команда одинакова на всех системах. Готовые файлы появляются в `build/`:
+`throne-gtk` и `throne-gtk-core` на Linux/macOS, файлы с суффиксом `.exe` на
+Windows и платформенная библиотека Cronet для протокола Naive.
+
+### Linux (Debian/Ubuntu)
 
 ```sh
-cd core/gen && protoc -I . --go_out=. --go-grpc_out=. libcore.proto && cd ../..
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev protobuf-compiler just
+RELEASE=1 just build
+```
+
+### macOS
+
+```sh
+brew install libadwaita protobuf just dylibbundler librsvg
+RELEASE=1 just build
+```
+
+GTK использует нативный Quartz-бэкенд. Значок StatusNotifierItem доступен
+только на Linux; на macOS вместо него используется нативный значок menu bar с
+командами открытия окна и выхода.
+
+Чтобы получить устанавливаемый образ с самодостаточным `.app`:
+
+```sh
+just dmg
+open dist/throne-gtk-macos.dmg
+```
+
+Перетащите **Throne GTK** из открывшегося образа в `Applications`. Команда
+собирает release-бинарники, переносит внутрь `.app` динамические библиотеки GTK,
+создаёт `.icns`, подписывает bundle ad-hoc и пишет образ в
+`dist/throne-gtk-macos.dmg`. На компьютере пользователя Homebrew не требуется.
+
+Ad-hoc подпись удобна для своей машины. Для публичной раздачи укажите сертификат
+Developer ID и профиль `notarytool`, заранее сохранённый в Keychain:
+
+```sh
+xcrun notarytool store-credentials throne-notary \
+  --apple-id you@example.com --team-id TEAMID --password APP_PASSWORD
+
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_PROFILE=throne-notary just dmg
+```
+
+В этом режиме скрипт включает Hardened Runtime, подписывает `.app` и `.dmg`,
+отправляет образ в Apple Notary Service и прикрепляет полученный ticket. Без
+Developer ID скачанный ad-hoc образ может потребовать подтверждения запуска в
+системных настройках безопасности.
+
+### Windows
+
+Сборка выполняется в терминале **MSYS2 MinGW 64-bit** с GNU-вариантом Rust:
+
+```sh
+pacman -S --needed mingw-w64-x86_64-gcc \
+  mingw-w64-x86_64-gtk4 mingw-w64-x86_64-libadwaita \
+  mingw-w64-x86_64-pkgconf mingw-w64-x86_64-protobuf \
+  mingw-w64-x86_64-just
+rustup toolchain install stable-x86_64-pc-windows-gnu
+rustup default stable-x86_64-pc-windows-gnu
+RELEASE=1 just build
+```
+
+Каталог `C:\\msys64\\mingw64\\bin` должен быть в `PATH` при запуске: там лежат
+DLL GTK и libadwaita. Для VPN-режима программу нужно запускать от имени
+администратора. Трей на Windows пока отключён, поэтому закрытие окна завершает
+приложение.
+
+GitHub Actions (`.github/workflows/build.yml`) при каждом push и pull request
+запускает тесты и release-сборку на Ubuntu, macOS и Windows, после чего
+публикует бинарные файлы для Linux и Windows, а для macOS — готовый `.dmg`.
+
+Пример Linux-сборки без `just`:
+
+```sh
+mkdir -p build
 cd core && GOTOOLCHAIN=go1.26.0 CGO_ENABLED=1 go build -o ../build/throne-gtk-core -trimpath \
-    -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,badlinkname,tfogo_checklinkname0" \
+    -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,with_purego,with_naive_outbound,badlinkname,tfogo_checklinkname0" \
     -ldflags "-w -s -checklinkname=0" && cd ..
 cargo build --release -p throne-app && cp target/release/throne-gtk build/
 ```
 
-## Установка
+## Установка в Linux
 
 ```sh
-just install        # или ./scripts/install.sh
+just install
 ```
 
 Приложение появится в списке программ рабочего стола под именем «Throne GTK».

@@ -12,7 +12,11 @@ RELEASE := bool(env("RELEASE", "0"))
 
 # Run the GUI
 run-app: build
-    ./build/throne-gtk
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suffix=""
+    [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
+    "./build/throne-gtk${suffix}"
 
 # Build everything: core and interface
 [group('build')]
@@ -21,16 +25,46 @@ build: build-core fetch-cronet build-app
 # Build the core (Go, sing-box + Xray)
 [group('build')]
 build-core:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p build
+    suffix=""
+    cgo=1
+    if [[ "$(go env GOOS)" == "windows" ]]; then
+        suffix=".exe"
+        cgo=0
+    fi
+    version="$(cd core && go list -m -f '{{{{.Version}}' github.com/sagernet/sing-box)"
+    (cd core && CGO_ENABLED="$cgo" go build -o "../build/throne-gtk-core${suffix}" -trimpath \
+        -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=${version}' -checklinkname=0" \
+        -tags "{{ core_tags }}")
+
+# Regenerate committed Go protobuf sources after editing core/gen/libcore.proto.
+generate-core-proto:
     cd core/gen && protoc -I . --go_out=. --go-grpc_out=. libcore.proto
-    cd core && CGO_ENABLED=1 go build -o ../build/throne-gtk-core -trimpath \
-        -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$(go list -m -f '{{{{.Version}}' github.com/sagernet/sing-box)' -checklinkname=0" \
-        -tags "{{ core_tags }}"
+
+# Build a self-contained macOS app bundle and DMG.
+[group('packaging')]
+dmg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "DMG можно собрать только на macOS" >&2
+        exit 1
+    fi
+    RELEASE=1 just build
+    ./scripts/package-macos.sh
 
 # Build the interface (Rust, GTK4) [set RELEASE=1 to enable release build]
 [group('build')]
 build-app:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p build
+    suffix=""
+    [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
     cargo build {{ if RELEASE == "true" { "--release" } }} -p throne-app
-    cp target/{{ if RELEASE == "true" { "release" } else { "debug" } }}/throne-gtk build/
+    cp "target/{{ if RELEASE == "true" { "release" } else { "debug" } }}/throne-gtk${suffix}" build/
 
 # Place libcronet near core to enable Naive
 [group('build')]
@@ -38,17 +72,30 @@ fetch-cronet:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    root="."
-    module_dir="$(go env GOMODCACHE)/github.com/parhelia512/cronet-go/lib"
+    goos="$(go env GOOS)"
+    goarch="$(go env GOARCH)"
+    module="github.com/sagernet/cronet-go/lib/${goos}_${goarch}"
+    module_dir="$(cd core && go list -m -f '{{{{.Dir}}' "$module" 2>/dev/null || true)"
 
-    library="$(find "$module_dir" -maxdepth 2 -name libcronet.so -path "*linux_amd64*" 2>/dev/null | head -1)"
-    if [[ -z "$library" ]]; then
-        echo "libcronet.so не найдена в кэше модулей — naive работать не будет" >&2
+    case "$goos" in
+        linux)   library_name="libcronet.so" ;;
+        darwin)  library_name="libcronet.dylib" ;;
+        windows) library_name="libcronet.dll" ;;
+        *)
+            echo "Cronet для ${goos}/${goarch} не поддержан — naive работать не будет" >&2
+            exit 0
+            ;;
+    esac
+
+    library="${module_dir}/${library_name}"
+    if [[ ! -f "$library" ]]; then
+        echo "${library_name} не найдена в модуле ${module} — naive работать не будет" >&2
         exit 0
     fi
 
-    install -Dm644 "$library" "$root/build/libcronet.so"
-    echo "libcronet.so → build/"
+    mkdir -p build
+    cp "$library" "build/${library_name}"
+    echo "${library_name} → build/"
 
 # Tests
 [group('test')]
@@ -59,11 +106,15 @@ test:
 # The binary is copied under the name throne-gtk — the core does not accept another parent.
 [group('test')]
 selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suffix=""
+    [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
     cargo build -p throne-app --example selftest
     mkdir -p target/selftest
-    cp target/debug/examples/selftest target/selftest/throne-gtk
-    cp build/throne-gtk-core target/selftest/
-    ./target/selftest/throne-gtk
+    cp "target/debug/examples/selftest${suffix}" "target/selftest/throne-gtk${suffix}"
+    cp "build/throne-gtk-core${suffix}" target/selftest/
+    "./target/selftest/throne-gtk${suffix}"
 
 # Clean build data
 clean:

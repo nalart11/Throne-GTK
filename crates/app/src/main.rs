@@ -5,6 +5,13 @@ mod format;
 mod logbridge;
 mod paths;
 mod state;
+#[cfg(target_os = "linux")]
+mod tray;
+#[cfg(target_os = "macos")]
+#[path = "tray_macos.rs"]
+mod tray;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[path = "tray_stub.rs"]
 mod tray;
 mod ui;
 
@@ -34,8 +41,8 @@ fn main() -> glib::ExitCode {
         .with(logbridge::LogBridge::new(events_tx.clone()))
         .init();
 
-    // Create the tray icon before the window: it lives in its own thread and
-    // has time to register with the panel before the first window close.
+    // Start tray setup before creating the window. Linux registers it from a
+    // worker thread; macOS completes it on the first main-loop iteration.
     let (actions_tx, actions_rx) = async_channel::unbounded::<tray::Action>();
     let tray = tray::start(actions_tx);
 
@@ -123,7 +130,7 @@ fn build(
         }
     });
 
-    // Clicks on the icon arrive here from its thread.
+    // Tray menu actions arrive here through the platform-independent channel.
     glib::spawn_future_local({
         let window = window.clone();
         let state = state.clone();

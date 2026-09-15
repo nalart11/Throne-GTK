@@ -3,6 +3,7 @@
 /build/
 /target/
 /core/build/
+/dist/
 /.idea
 
 # Локальные данные и заметки

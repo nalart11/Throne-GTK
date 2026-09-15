@@ -443,11 +443,7 @@ async fn connect(
     if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
         let core = core;
         core.shutdown().await;
-        anyhow::bail!(
-            "для режима VPN ядру нужны права на создание TUN-интерфейса.\n\
-             Выдайте их один раз: sudo setcap cap_net_admin,cap_net_raw+ep {}",
-            core_bin.display()
-        );
+        anyhow::bail!(vpn_privilege_hint(core_bin));
     }
 
     core.client
@@ -481,11 +477,7 @@ async fn connect_auto(
 
     if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
         core.shutdown().await;
-        anyhow::bail!(
-            "для режима VPN ядру нужны права на создание TUN-интерфейса.\n\
-             Выдайте их один раз: sudo setcap cap_net_admin,cap_net_raw+ep {}",
-            core_bin.display()
-        );
+        anyhow::bail!(vpn_privilege_hint(core_bin));
     }
 
     core.client
@@ -511,6 +503,24 @@ async fn connect_auto(
         tags,
         auto_members,
     })
+}
+
+fn vpn_privilege_hint(core_bin: &Path) -> String {
+    #[cfg(target_os = "linux")]
+    return format!(
+        "для режима VPN ядру нужны права на создание TUN-интерфейса.\n\
+         Выдайте их один раз: sudo setcap cap_net_admin,cap_net_raw+ep {}",
+        core_bin.display()
+    );
+
+    #[cfg(target_os = "windows")]
+    return "для режима VPN перезапустите Throne GTK от имени администратора".into();
+
+    #[cfg(target_os = "macos")]
+    return "для режима VPN Throne GTK должен быть запущен с правами root".into();
+
+    #[allow(unreachable_code)]
+    "для режима VPN нужны права на создание TUN-интерфейса".into()
 }
 
 async fn check_config(

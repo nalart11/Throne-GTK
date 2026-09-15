@@ -1,8 +1,8 @@
 //! Transport to the ThroneGtkCore core.
 //!
-//! The core does not create the socket itself: it connects to ours, checking that
-//! the SO_PEERCRED peer is its own parent and that the parent's binary is nearby
-//! and named `throne-gtk`. Therefore, the GUI listens and the core connects.
+//! The core does not create the endpoint itself: it connects to ours through a
+//! Unix socket or Windows named pipe, checking that the peer is its own parent
+//! and that the parent's binary is nearby and named `throne-gtk`.
 //!
 //! Frames (little-endian):
 //!   request: [u32 req_id][u16 method_len][method][u32 payload_len][payload]
@@ -18,9 +18,18 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context, Result};
 use prost::Message;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
+
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
+
+#[cfg(unix)]
+type IpcStream = UnixStream;
+#[cfg(windows)]
+type IpcStream = NamedPipeServer;
 
 pub mod pb {
     include!(concat!(env!("OUT_DIR"), "/libcore.rs"));
@@ -47,23 +56,39 @@ pub struct CoreClient {
 /// The running core process together with its channel.
 pub struct Core {
     child: Child,
-    socket_path: PathBuf,
+    endpoint: PathBuf,
     pub client: CoreClient,
 }
 
 impl Core {
-    /// Creates the socket, starts `core_bin`, and waits for the core to connect.
+    /// Creates the IPC endpoint, starts `core_bin`, and waits for it to connect.
     pub async fn spawn(core_bin: &Path, socket_dir: &Path, debug: bool) -> Result<Self> {
-        let socket_path = socket_dir.join(format!("core-{}.sock", std::process::id()));
-        let _ = std::fs::remove_file(&socket_path);
-        std::fs::create_dir_all(socket_dir)
-            .with_context(|| format!("создание {}", socket_dir.display()))?;
+        // Windows derives a named-pipe name from the PID and has no socket directory.
+        #[cfg(windows)]
+        let _ = socket_dir;
 
-        let listener = UnixListener::bind(&socket_path)
-            .with_context(|| format!("bind {}", socket_path.display()))?;
+        #[cfg(unix)]
+        let endpoint = socket_dir.join(format!("core-{}.sock", std::process::id()));
+        #[cfg(windows)]
+        let endpoint = PathBuf::from(format!(r"\\.\pipe\throne-gtk-{}", std::process::id()));
+
+        #[cfg(unix)]
+        let listener = {
+            cleanup_endpoint(&endpoint);
+            std::fs::create_dir_all(socket_dir)
+                .with_context(|| format!("создание {}", socket_dir.display()))?;
+            UnixListener::bind(&endpoint).with_context(|| format!("bind {}", endpoint.display()))?
+        };
+        #[cfg(windows)]
+        let listener = ServerOptions::new()
+            // Refuse to attach to an endpoint planted before us. The core also
+            // verifies the server PID after connecting.
+            .first_pipe_instance(true)
+            .create(&endpoint)
+            .with_context(|| format!("создание {}", endpoint.display()))?;
 
         let mut cmd = Command::new(core_bin);
-        cmd.env("THRONE_CORE_SOCKET", &socket_path)
+        cmd.env("THRONE_CORE_SOCKET", &endpoint)
             .env("THRONE_CORE_DEBUG", if debug { "1" } else { "0" })
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -72,7 +97,7 @@ impl Core {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let _ = std::fs::remove_file(&socket_path);
+                cleanup_endpoint(&endpoint);
                 return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
             }
         };
@@ -80,21 +105,29 @@ impl Core {
         pipe_core_logs(&mut child);
 
         // The core retries the connection ten times at 500 ms intervals; wait with some margin.
-        let accept = tokio::time::timeout(std::time::Duration::from_secs(15), listener.accept());
+        #[cfg(unix)]
+        let accept = async { listener.accept().await.map(|(stream, _)| stream) };
+        #[cfg(windows)]
+        let accept = async {
+            listener.connect().await?;
+            Ok::<_, std::io::Error>(listener)
+        };
+
+        let accept = tokio::time::timeout(std::time::Duration::from_secs(15), accept);
         let stream = match accept.await {
-            Ok(Ok((stream, _))) => stream,
+            Ok(Ok(stream)) => stream,
             Ok(Err(e)) => {
                 let _ = child.kill().await;
-                let _ = std::fs::remove_file(&socket_path);
+                cleanup_endpoint(&endpoint);
                 return Err(e).context("accept от ядра");
             }
             Err(_) => {
                 let _ = child.kill().await;
-                let _ = std::fs::remove_file(&socket_path);
+                cleanup_endpoint(&endpoint);
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
                      `throne-gtk` и лежит рядом с ядром",
-                    socket_path.display()
+                    endpoint.display()
                 );
             }
         };
@@ -102,7 +135,7 @@ impl Core {
         let client = CoreClient::attach(stream);
         Ok(Self {
             child,
-            socket_path,
+            endpoint,
             client,
         })
     }
@@ -110,7 +143,7 @@ impl Core {
     pub async fn shutdown(mut self) {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.client.stop()).await;
         let _ = self.child.kill().await;
-        let _ = std::fs::remove_file(&self.socket_path);
+        cleanup_endpoint(&self.endpoint);
     }
 
     /// Whether the core process has exited on its own.
@@ -121,8 +154,18 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket_path);
+        cleanup_endpoint(&self.endpoint);
     }
+}
+
+#[cfg(unix)]
+fn cleanup_endpoint(endpoint: &Path) {
+    let _ = std::fs::remove_file(endpoint);
+}
+
+#[cfg(windows)]
+fn cleanup_endpoint(_endpoint: &Path) {
+    // A named pipe disappears when its final handle is closed.
 }
 
 fn pipe_core_logs(child: &mut Child) {
@@ -182,8 +225,8 @@ pub fn speed_test_request(config: String) -> pb::SpeedTestRequest {
 }
 
 impl CoreClient {
-    fn attach(stream: UnixStream) -> Self {
-        let (mut reader, mut writer) = stream.into_split();
+    fn attach(stream: IpcStream) -> Self {
+        let (mut reader, mut writer) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::channel::<Call>(64);
         let pending: Pending = Arc::default();
         let next_id = Arc::new(AtomicU32::new(1));

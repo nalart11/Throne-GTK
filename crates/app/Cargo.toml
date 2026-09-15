@@ -25,4 +25,9 @@ gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 async-channel = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = { version = "0.25", default-features = false }

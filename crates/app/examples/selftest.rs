@@ -71,7 +71,10 @@ async fn main() -> Result<()> {
     // Look for the core next to this executable; only then does its parent check pass.
     let core_bin = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("throne-gtk-core")))
+        .and_then(|p| {
+            p.parent()
+                .map(|d| d.join(format!("throne-gtk-core{}", std::env::consts::EXE_SUFFIX)))
+        })
         .filter(|p| p.exists());
     let Some(core_bin) = core_bin else {
         println!("\nядро не собрано — проверку конфигов ядром пропускаю");
