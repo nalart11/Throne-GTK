@@ -21,6 +21,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+#[cfg(target_os = "macos")]
+mod service_macos;
+
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 #[cfg(unix)]
@@ -55,7 +58,7 @@ pub struct CoreClient {
 
 /// The running core process together with its channel.
 pub struct Core {
-    child: Child,
+    child: Option<Child>,
     endpoint: PathBuf,
     pub client: CoreClient,
 }
@@ -63,6 +66,25 @@ pub struct Core {
 impl Core {
     /// Creates the IPC endpoint, starts `core_bin`, and waits for it to connect.
     pub async fn spawn(core_bin: &Path, socket_dir: &Path, debug: bool) -> Result<Self> {
+        Self::spawn_inner(core_bin, socket_dir, debug, false).await
+    }
+
+    /// Starts the core through the macOS root-helper. Other platforms retain
+    /// their existing privilege mechanism and spawn the core normally.
+    pub async fn spawn_privileged(core_bin: &Path, socket_dir: &Path, debug: bool) -> Result<Self> {
+        #[cfg(target_os = "macos")]
+        return Self::spawn_inner(core_bin, socket_dir, debug, true).await;
+
+        #[cfg(not(target_os = "macos"))]
+        Self::spawn(core_bin, socket_dir, debug).await
+    }
+
+    async fn spawn_inner(
+        core_bin: &Path,
+        socket_dir: &Path,
+        debug: bool,
+        privileged: bool,
+    ) -> Result<Self> {
         // Windows derives a named-pipe name from the PID and has no socket directory.
         #[cfg(windows)]
         let _ = socket_dir;
@@ -87,22 +109,33 @@ impl Core {
             .create(&endpoint)
             .with_context(|| format!("создание {}", endpoint.display()))?;
 
-        let mut cmd = Command::new(core_bin);
-        cmd.env("THRONE_CORE_SOCKET", &endpoint)
-            .env("THRONE_CORE_DEBUG", if debug { "1" } else { "0" })
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
+        let mut child = None;
+        if privileged {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = service_macos::start_privileged_core(&endpoint, debug).await {
                 cleanup_endpoint(&endpoint);
-                return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
+                return Err(error);
             }
-        };
-
-        pipe_core_logs(&mut child);
+            #[cfg(not(target_os = "macos"))]
+            unreachable!("privileged helper is only used on macOS");
+        } else {
+            let mut cmd = Command::new(core_bin);
+            cmd.env("THRONE_CORE_SOCKET", &endpoint)
+                .env("THRONE_CORE_DEBUG", if debug { "1" } else { "0" })
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            let mut spawned = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    cleanup_endpoint(&endpoint);
+                    return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
+                }
+            };
+            pipe_core_logs(&mut spawned);
+            child = Some(spawned);
+        }
 
         // The core retries the connection ten times at 500 ms intervals; wait with some margin.
         #[cfg(unix)]
@@ -117,12 +150,16 @@ impl Core {
         let stream = match accept.await {
             Ok(Ok(stream)) => stream,
             Ok(Err(e)) => {
-                let _ = child.kill().await;
+                if let Some(child) = child.as_mut() {
+                    let _ = child.kill().await;
+                }
                 cleanup_endpoint(&endpoint);
                 return Err(e).context("accept от ядра");
             }
             Err(_) => {
-                let _ = child.kill().await;
+                if let Some(child) = child.as_mut() {
+                    let _ = child.kill().await;
+                }
                 cleanup_endpoint(&endpoint);
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
@@ -142,13 +179,17 @@ impl Core {
 
     pub async fn shutdown(mut self) {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.client.stop()).await;
-        let _ = self.child.kill().await;
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill().await;
+        }
         cleanup_endpoint(&self.endpoint);
     }
 
     /// Whether the core process has exited on its own.
     pub fn exited(&mut self) -> Option<std::process::ExitStatus> {
-        self.child.try_wait().ok().flatten()
+        self.child
+            .as_mut()
+            .and_then(|child| child.try_wait().ok().flatten())
     }
 }
 

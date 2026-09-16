@@ -264,16 +264,21 @@ fn inbounds_section(settings: &Settings) -> Value {
         if settings.tun_ipv6 {
             address.push(settings.tun_ipv6_cidr.clone());
         }
-        inbounds.push(json!({
+        let mut tun = json!({
             "type": "tun",
             "tag": tags::TUN_IN,
             "address": address,
             "mtu": settings.tun_mtu,
             "auto_route": true,
-            "auto_redirect": true,
             "strict_route": settings.tun_strict_route,
             "stack": settings.tun_stack.as_str(),
-        }));
+        });
+        // sing-box implements auto_redirect through Linux nftables. Passing
+        // it on macOS or Windows makes TUN initialization fail with EINVAL.
+        if cfg!(target_os = "linux") {
+            tun["auto_redirect"] = json!(true);
+        }
+        inbounds.push(tun);
     }
 
     Value::Array(inbounds)
@@ -536,7 +541,10 @@ mod tests {
         assert_eq!(tun["address"][0], "172.19.0.1/30");
         assert_eq!(tun["stack"], "mixed");
         assert_eq!(tun["auto_route"], true);
+        #[cfg(target_os = "linux")]
         assert_eq!(tun["auto_redirect"], true);
+        #[cfg(not(target_os = "linux"))]
+        assert!(tun.get("auto_redirect").is_none());
         assert_eq!(v["route"]["auto_detect_interface"], true);
     }
 

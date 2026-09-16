@@ -5,6 +5,7 @@
 /core/build/
 /dist/
 /.idea
+.DS_Store
 
 # Локальные данные и заметки
 *.db

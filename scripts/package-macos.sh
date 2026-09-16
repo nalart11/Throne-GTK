@@ -12,7 +12,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
-for tool in brew dylibbundler rsvg-convert iconutil hdiutil codesign plutil otool file; do
+for tool in brew dylibbundler rsvg-convert iconutil hdiutil codesign plutil otool file perl; do
     if ! command -v "$tool" >/dev/null; then
         echo "Не найдена команда $tool" >&2
         echo "Установите зависимости: brew install dylibbundler librsvg" >&2
@@ -20,7 +20,7 @@ for tool in brew dylibbundler rsvg-convert iconutil hdiutil codesign plutil otoo
     fi
 done
 
-for file in throne-gtk throne-gtk-core libcronet.dylib; do
+for file in throne-gtk throne-gtk-core; do
     if [[ ! -f "$root/build/$file" ]]; then
         echo "Нет build/$file — сначала выполните RELEASE=1 just build" >&2
         exit 1
@@ -31,12 +31,15 @@ version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 [[ -n "$version" ]] || version="0.1.0"
 
 rm -rf "$app" "$dmg"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks" \
+    "$app/Contents/Library/LaunchDaemons"
 install -m755 "$root/build/throne-gtk" "$app/Contents/MacOS/throne-gtk"
 install -m755 "$root/build/throne-gtk-core" "$app/Contents/MacOS/throne-gtk-core"
-install -m755 "$root/build/libcronet.dylib" "$app/Contents/MacOS/libcronet.dylib"
+install -m644 "$root/resources/macos/dev.nalart.ThroneGtk.helper.plist" \
+    "$app/Contents/Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist"
 sed "s/@VERSION@/$version/g" "$root/resources/macos/Info.plist.in" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist"
+plutil -lint "$app/Contents/Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist"
 
 icon_work="$(mktemp -d "${TMPDIR:-/tmp}/throne-gtk-icon.XXXXXX")"
 iconset="$icon_work/AppIcon.iconset"
@@ -55,13 +58,44 @@ for spec in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" \
     name="${spec#*:}"
     rsvg-convert -w "$pixels" -h "$pixels" "$svg" -o "$iconset/icon_${name}.png"
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
+if ! iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"; then
+    # Some macOS releases reject a valid PNG iconset. ICNS is a simple chunked
+    # container; build the same lossless PNG chunks directly as a fallback.
+    echo "iconutil отклонил iconset, создаю ICNS напрямую" >&2
+    perl -e '
+        use strict;
+        my $output = shift;
+        my (@chunks, $total) = ((), 8);
+        while (@ARGV) {
+            my ($type, $path) = splice(@ARGV, 0, 2);
+            open my $input, "<", $path or die "$path: $!\n";
+            binmode $input;
+            local $/;
+            my $data = <$input>;
+            my $chunk = $type . pack("N", length($data) + 8) . $data;
+            push @chunks, $chunk;
+            $total += length($chunk);
+        }
+        open my $result, ">", $output or die "$output: $!\n";
+        binmode $result;
+        print {$result} "icns", pack("N", $total), @chunks;
+    ' "$app/Contents/Resources/AppIcon.icns" \
+        icp4 "$iconset/icon_16x16.png" \
+        ic11 "$iconset/icon_16x16@2x.png" \
+        icp5 "$iconset/icon_32x32.png" \
+        ic12 "$iconset/icon_32x32@2x.png" \
+        ic07 "$iconset/icon_128x128.png" \
+        ic13 "$iconset/icon_128x128@2x.png" \
+        ic08 "$iconset/icon_256x256.png" \
+        ic14 "$iconset/icon_256x256@2x.png" \
+        ic09 "$iconset/icon_512x512.png" \
+        ic10 "$iconset/icon_512x512@2x.png"
+fi
 
 brew_lib="$(brew --prefix)/lib"
 dylibbundler -od -b \
     -x "$app/Contents/MacOS/throne-gtk" \
     -x "$app/Contents/MacOS/throne-gtk-core" \
-    -x "$app/Contents/MacOS/libcronet.dylib" \
     -d "$app/Contents/Frameworks" \
     -p "@executable_path/../Frameworks" \
     -s "$brew_lib"
@@ -90,7 +124,6 @@ fi
 while IFS= read -r -d '' library; do
     codesign "${sign_args[@]}" "$library"
 done < <(find "$app/Contents/Frameworks" -type f -name '*.dylib' -print0)
-codesign "${sign_args[@]}" "$app/Contents/MacOS/libcronet.dylib"
 codesign "${sign_args[@]}" "$app/Contents/MacOS/throne-gtk-core"
 codesign "${sign_args[@]}" "$app/Contents/MacOS/throne-gtk"
 codesign "${sign_args[@]}" "$app"

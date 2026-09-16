@@ -30,14 +30,23 @@ build-core:
     mkdir -p build
     suffix=""
     cgo=1
+    cgo_ldflags=""
     if [[ "$(go env GOOS)" == "windows" ]]; then
         suffix=".exe"
         cgo=0
     fi
+    tags="{{ core_tags }}"
+    # The Darwin Cronet module ships libcronet.a, not a dylib.  purego would
+    # compile successfully but then fail to load Cronet when Naive is used.
+    if [[ "$(go env GOOS)" == "darwin" ]]; then
+        tags="${tags/,with_purego/}"
+        cgo_ldflags="-framework UniformTypeIdentifiers"
+    fi
     version="$(cd core && go list -m -f '{{{{.Version}}' github.com/sagernet/sing-box)"
-    (cd core && CGO_ENABLED="$cgo" go build -o "../build/throne-gtk-core${suffix}" -trimpath \
+    (cd core && CGO_ENABLED="$cgo" CGO_LDFLAGS="$cgo_ldflags" \
+        go build -o "../build/throne-gtk-core${suffix}" -trimpath \
         -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=${version}' -checklinkname=0" \
-        -tags "{{ core_tags }}")
+        -tags "$tags")
 
 # Regenerate committed Go protobuf sources after editing core/gen/libcore.proto.
 generate-core-proto:
@@ -54,6 +63,12 @@ dmg:
     fi
     RELEASE=1 just build
     ./scripts/package-macos.sh
+
+# Build an unsigned local PKG which installs the app and root-helper with one
+# administrator prompt. It is intended for personal use without Developer ID.
+[group('packaging')]
+installer: dmg
+    ./scripts/package-macos-installer.sh
 
 # Build the interface (Rust, GTK4) [set RELEASE=1 to enable release build]
 [group('build')]
@@ -79,7 +94,15 @@ fetch-cronet:
 
     case "$goos" in
         linux)   library_name="libcronet.so" ;;
-        darwin)  library_name="libcronet.dylib" ;;
+        darwin)
+            # Cronet is linked from libcronet.a while building the core.
+            if [[ -f "${module_dir}/libcronet.a" ]]; then
+                echo "Cronet статически слинкован с ядром"
+                exit 0
+            fi
+            echo "libcronet.a не найдена в модуле ${module} — naive работать не будет" >&2
+            exit 0
+            ;;
         windows) library_name="libcronet.dll" ;;
         *)
             echo "Cronet для ${goos}/${goarch} не поддержан — naive работать не будет" >&2

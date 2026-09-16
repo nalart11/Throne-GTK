@@ -13,3 +13,4 @@ bytes = "1"
 
 [build-dependencies]
 prost-build = "0.13"
+cc = "1"

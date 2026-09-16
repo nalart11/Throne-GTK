@@ -438,7 +438,11 @@ async fn connect(
     settings: &Settings,
 ) -> Result<Running> {
     let generated = throne_config::generate(profile, settings).context("сборка конфига")?;
-    let core = Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?;
+    let core = if settings.mode.is_vpn() {
+        Core::spawn_privileged(core_bin, runtime_dir, settings.log_level == "debug").await?
+    } else {
+        Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?
+    };
 
     if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
         let core = core;
@@ -473,7 +477,11 @@ async fn connect_auto(
     }
     let generated =
         throne_config::generate::generate_auto(profiles, settings).context("сборка конфига")?;
-    let core = Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?;
+    let core = if settings.mode.is_vpn() {
+        Core::spawn_privileged(core_bin, runtime_dir, settings.log_level == "debug").await?
+    } else {
+        Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?
+    };
 
     if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
         core.shutdown().await;
@@ -505,19 +513,19 @@ async fn connect_auto(
     })
 }
 
-fn vpn_privilege_hint(core_bin: &Path) -> String {
+fn vpn_privilege_hint(_core_bin: &Path) -> String {
     #[cfg(target_os = "linux")]
     return format!(
         "для режима VPN ядру нужны права на создание TUN-интерфейса.\n\
          Выдайте их один раз: sudo setcap cap_net_admin,cap_net_raw+ep {}",
-        core_bin.display()
+        _core_bin.display()
     );
 
     #[cfg(target_os = "windows")]
     return "для режима VPN перезапустите Throne GTK от имени администратора".into();
 
     #[cfg(target_os = "macos")]
-    return "для режима VPN Throne GTK должен быть запущен с правами root".into();
+    return "root-helper запущен, но не получил права на создание TUN-интерфейса".into();
 
     #[allow(unreachable_code)]
     "для режима VPN нужны права на создание TUN-интерфейса".into()

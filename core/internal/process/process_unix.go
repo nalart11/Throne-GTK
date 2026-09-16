@@ -36,9 +36,8 @@ func applyPrivilegeDrop(cmd *exec.Cmd) error {
 	if os.Geteuid() != 0 {
 		return nil // not elevated, run as-is
 	}
-	ruid := os.Getuid()
-	rgid := os.Getgid()
-	if ruid == 0 {
+	ruid, rgid, ok := unprivilegedIDs()
+	if !ok {
 		return errors.New("refusing to start extra process as root: no unprivileged user to drop to")
 	}
 
@@ -109,9 +108,8 @@ func makeConfigReadable(f *os.File) error {
 	if os.Geteuid() != 0 {
 		return f.Chmod(0o600) // fchmod(fd)
 	}
-	ruid := os.Getuid()
-	rgid := os.Getgid()
-	if ruid == 0 {
+	ruid, rgid, ok := unprivilegedIDs()
+	if !ok {
 		// Start() refuses to launch in this case anyway.
 		return nil
 	}
@@ -119,6 +117,26 @@ func makeConfigReadable(f *os.File) error {
 		return err
 	}
 	return f.Chmod(0o600) // fchmod(fd)
+}
+
+// unprivilegedIDs returns the user that privileged child processes must drop
+// to. A setuid core gets it from the real ids; the macOS launchd helper passes
+// the authenticated GUI peer's ids because launchd starts with real uid 0.
+func unprivilegedIDs() (int, int, bool) {
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid != 0 {
+		return uid, gid, true
+	}
+	uidValue, gidValue := os.Getenv("THRONE_CORE_CLIENT_UID"), os.Getenv("THRONE_CORE_CLIENT_GID")
+	if uidValue == "" || gidValue == "" {
+		return 0, 0, false
+	}
+	uid, uidErr := strconv.Atoi(uidValue)
+	gid, gidErr := strconv.Atoi(gidValue)
+	if uidErr != nil || gidErr != nil || uid <= 0 || gid < 0 {
+		return 0, 0, false
+	}
+	return uid, gid, true
 }
 
 // createSecureConfigFile creates the extra-process config file with a

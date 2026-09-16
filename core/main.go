@@ -13,6 +13,7 @@ import (
 	runtimeDebug "runtime/debug"
 	"runtime/metrics"
 	"runtime/pprof"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -90,11 +91,23 @@ func RunCore() {
 	}
 	debug = os.Getenv("THRONE_CORE_DEBUG") == "1"
 
-	parentcheck.CheckParentProcess()
+	guiPID := parentcheck.ParentPID
+	if value := os.Getenv("THRONE_CORE_GUI_PID"); value != "" {
+		if !trustedGUIOverrideAllowed() {
+			log.Fatal("THRONE_CORE_GUI_PID is only accepted from the privileged helper worker")
+		}
+		var parseErr error
+		guiPID, parseErr = strconv.Atoi(value)
+		if parseErr != nil || guiPID <= 0 {
+			log.Fatalf("invalid THRONE_CORE_GUI_PID %q", value)
+		}
+	} else {
+		parentcheck.CheckParentProcess()
+	}
 
 	// Exit when parent dies
 	go func() {
-		parent, err := os.FindProcess(parentcheck.ParentPID)
+		parent, err := os.FindProcess(guiPID)
 		if err != nil {
 			log.Fatalln("find parent:", err)
 		}
@@ -118,7 +131,7 @@ func RunCore() {
 	var conn net.Conn
 	var err error
 	for i := 0; i < 10; i++ {
-		conn, err = ipc.ConnectIPC(socketName, parentcheck.ParentPID)
+		conn, err = ipc.ConnectIPC(socketName, guiPID)
 		if err == nil {
 			break
 		}
@@ -141,12 +154,17 @@ func main() {
 			os.Exit(2)
 		}
 	}()
+	if runPlatformMode() {
+		return
+	}
+	prepareCoreRuntime()
+	RunCore()
+}
+
+func prepareCoreRuntime() {
 	fmt.Println("sing-box:", C.Version)
 	fmt.Println("Xray-core:", core.Version())
 	fmt.Println()
 	runtimeDebug.SetMemoryLimit(memoryLimit)
 	go watchMemory()
-
-	RunCore()
-	return
 }

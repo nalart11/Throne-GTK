@@ -3,6 +3,7 @@
 package parentcheck
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,15 +12,24 @@ import (
 )
 
 func CheckParentProcess() {
-	parentPath, err := getParentExePath(ParentPID)
+	if err := CheckGUIProcess(ParentPID); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// CheckGUIProcess verifies that pid is the throne-gtk executable shipped next
+// to this core. The macOS privileged helper uses this for the process at the
+// other end of its control socket; the ordinary core uses it for its parent.
+func CheckGUIProcess(pid int) error {
+	parentPath, err := getParentExePath(pid)
 	if err != nil {
-		log.Fatalf("parent check: cannot read parent executable: %v", err)
+		return fmt.Errorf("parent check: cannot read GUI executable: %w", err)
 	}
 	parentPath = resolveFinalPath(parentPath)
 
 	selfPath, err := os.Executable()
 	if err != nil {
-		log.Fatalf("parent check: cannot read own executable: %v", err)
+		return fmt.Errorf("parent check: cannot read own executable: %w", err)
 	}
 	selfPath = resolveFinalPath(selfPath)
 
@@ -29,12 +39,21 @@ func CheckParentProcess() {
 
 	if runtime.GOOS == "windows" {
 		if !strings.EqualFold(parentDir, selfDir) || !strings.EqualFold(parentBase, "throne-gtk.exe") {
-			log.Fatalf("parent check failed: unexpected parent %q, selfPath is %q", parentPath, selfPath)
+			return fmt.Errorf("parent check failed: unexpected GUI %q, selfPath is %q", parentPath, selfPath)
 		}
-		return
+		return nil
 	}
 
 	if parentDir != selfDir || parentBase != "throne-gtk" {
-		log.Fatalf("parent check failed: unexpected parent %q, selfPath is %q", parentPath, selfPath)
+		return fmt.Errorf("parent check failed: unexpected GUI %q, selfPath is %q", parentPath, selfPath)
 	}
+	return nil
+}
+
+func ProcessPath(pid int) (string, error) {
+	path, err := getParentExePath(pid)
+	if err != nil {
+		return "", err
+	}
+	return resolveFinalPath(path), nil
 }

@@ -1,0 +1,29 @@
+#!/bin/bash
+set -eu
+
+label="dev.nalart.ThroneGtk.helper"
+target_volume="${3:-/}"
+app="$target_volume/Applications/Throne GTK.app"
+plist="$target_volume/Library/LaunchDaemons/$label.plist"
+
+/bin/chmod 755 "$app/Contents/MacOS/throne-gtk" "$app/Contents/MacOS/throne-gtk-core"
+/usr/sbin/chown root:wheel "$plist"
+/bin/chmod 644 "$plist"
+
+# A local unsigned package is an explicit administrator-authorised install.
+# Remove download quarantine so Gatekeeper does not reject its ad-hoc app on
+# the same Mac immediately after Installer has completed.
+/usr/bin/xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
+
+# Do not try to activate a service while installing onto an offline volume.
+if [ "$target_volume" != "/" ]; then
+    exit 0
+fi
+
+/bin/launchctl bootout "system/$label" 2>/dev/null || true
+/bin/rm -f "/var/run/$label.sock"
+/bin/launchctl bootstrap system "$plist"
+/bin/launchctl enable "system/$label"
+/bin/launchctl kickstart -k "system/$label"
+
+exit 0
