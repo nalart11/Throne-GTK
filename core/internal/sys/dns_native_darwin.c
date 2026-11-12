@@ -9,6 +9,7 @@
 #include <sys/acl.h>
 #include <errno.h>
 #include "../../helpertrust/acl_policy.h"
+#include "acl_presence.h"
 
 struct throne_dns_tx {
  SCPreferencesRef prefs;
@@ -161,8 +162,9 @@ int throne_dns_apply(throne_dns_tx *tx,int *status) {
 // helpertrust's policy: deny/read-only ACEs are safe; write grants, unknown
 // ACEs, unreadable ACLs and unreadable permission bits all fail closed.
 int throne_dns_safe_acl(int fd) {
- acl_t acl=acl_get_fd_np(fd,ACL_TYPE_EXTENDED);
- if (!acl) return -1;
+ acl_t acl=NULL;
+ int presence=throne_acl_read(fd,NULL,&acl);
+ if (presence<=0) return presence;
  if (acl_valid(acl)!=0) { acl_free(acl); return -1; }
  acl_entry_t entry;
  int selector=ACL_FIRST_ENTRY,result=0;

@@ -6,12 +6,14 @@
 #include <sys/stat.h>
 #include <Security/Security.h>
 #include "acl_policy.h"
+#include "../internal/sys/acl_presence.h"
 
 // Deny ACEs (including the standard everyone deny delete on /Library) do
 // not confer authority. Unknown ACE types or unreadable metadata fail closed.
 static int throne_safe_acl(const char *path) {
-    acl_t acl = acl_get_file(path, ACL_TYPE_EXTENDED);
-    if (!acl) return -1;
+    acl_t acl = NULL;
+    int presence = throne_acl_read(-1, path, &acl);
+    if (presence <= 0) return presence;
     if (acl_valid(acl) != 0) { acl_free(acl); return -1; }
     acl_entry_t entry;
     int selector = ACL_FIRST_ENTRY, result = 0;

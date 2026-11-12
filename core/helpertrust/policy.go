@@ -77,7 +77,14 @@ func CheckBundleLink(bundle, path string) error {
 	if err != nil {
 		return err
 	}
-	if !within(frameworks, resolved) {
+	// Compare canonical identities on both sides: macOS temporary paths can
+	// use /var while EvalSymlinks returns /private/var. This does not relax
+	// CheckTree's independent rejection of symlinked installation ancestors.
+	resolvedFrameworks, err := filepath.EvalSymlinks(frameworks)
+	if err != nil {
+		return err
+	}
+	if !within(resolvedFrameworks, resolved) {
 		return fmt.Errorf("escaping framework symlink: %s", path)
 	}
 	info, err := os.Lstat(path)

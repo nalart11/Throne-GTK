@@ -8,10 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "acl_policy.h"
+#include "../core/internal/sys/acl_presence.h"
 
 static int safe_acl(const char *path) {
-    acl_t acl = acl_get_file(path, ACL_TYPE_EXTENDED);
-    if (!acl) return -1;
+    acl_t acl = NULL;
+    int presence = throne_acl_read(-1, path, &acl);
+    if (presence <= 0) return presence;
     if (acl_valid(acl)) { acl_free(acl); return -1; }
     acl_entry_t entry;
     int selector = ACL_FIRST_ENTRY, result = 0;

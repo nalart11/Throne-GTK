@@ -6,6 +6,7 @@ fn main() {
         println!("cargo:rerun-if-changed=src/service_macos.m");
         println!("cargo:rerun-if-changed=../../core/helpertrust/security.h");
         println!("cargo:rerun-if-changed=../../core/helpertrust/acl_policy.h");
+        println!("cargo:rerun-if-changed=../../core/internal/sys/acl_presence.h");
         cc::Build::new()
             .file("src/service_macos.m")
             .flag("-fobjc-arc")

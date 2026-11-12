@@ -72,6 +72,62 @@ func TestContainedFrameworkLinks(t *testing.T) {
 	}
 }
 
+func TestContainedFrameworkLinksThroughSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	realParent := filepath.Join(root, "private", "var")
+	realBundle := filepath.Join(realParent, "Throne GTK.app")
+	frameworks := filepath.Join(realBundle, "Contents", "Frameworks")
+	if err := os.MkdirAll(frameworks, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Model macOS /var -> /private/var without relying on the host layout.
+	aliasParent := filepath.Join(root, "var")
+	if err := os.Symlink(realParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(aliasParent, "Throne GTK.app")
+	for _, path := range []string{filepath.Join(frameworks, "real"), filepath.Join(root, "outside")} {
+		if err := os.WriteFile(path, []byte("code"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "outside"), filepath.Join(frameworks, "redirect")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, target string
+		valid        bool
+	}{
+		{"alias", "real", true},
+		{"outside", filepath.Join(root, "outside"), false},
+		{"resolved-outside", "redirect", false},
+		{"dangling", "missing", false},
+		{"cycle", "cycle", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			link := filepath.Join(bundle, "Contents", "Frameworks", tc.name)
+			if err := os.Symlink(tc.target, link); err != nil {
+				t.Fatal(err)
+			}
+			err := CheckBundleLink(bundle, link)
+			if tc.valid && os.Getuid() != 0 {
+				if err == nil || !strings.Contains(err.Error(), "owner") {
+					t.Fatalf("contained link should reach ownership guard: %v", err)
+				}
+			} else if (err == nil) != tc.valid {
+				t.Fatalf("error = %v", err)
+			} else if !tc.valid && strings.Contains(err.Error(), "owner") {
+				t.Fatalf("invalid link should fail before ownership check: %v", err)
+			}
+		})
+	}
+	// Canonical containment is not permission to trust a symlinked install
+	// ancestor: the independent ancestor guard must still reject this alias.
+	if err := CheckAncestors(aliasParent, func(string) error { return nil }); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked installation ancestor accepted: %v", err)
+	}
+}
+
 func TestNativePolicySourceContract(t *testing.T) {
 	data, err := os.ReadFile("security.h")
 	if err != nil {

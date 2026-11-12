@@ -38,7 +38,7 @@ and pushing a `dev` handoff; the initial results below predate that follow-up.
   loopback HTTP proxy, shutdown/cleanup and restart smoke test. Cronet copying
   now uses `install -m 644`: module-cache permissions no longer break rebuilds.
 - `.github/workflows/stabilization.yml`: Linux/macOS test/build automation,
-  **not executed on hosted runners**.
+   with hosted results recorded separately below.
 - `docs/CROSS_PLATFORM_PLAN.md`, `docs/MACOS_VALIDATION.md`: sequential gates
   and explicit native/manual acceptance matrix.
 
@@ -149,6 +149,36 @@ busy/conflict. Native API-symbol review also corrected the public Security
 function to `SecCodeCopyDesignatedRequirement` using Apple's declaration.
 This is a development handoff, not production or macOS-stage approval.
 
+### First hosted macOS run
+
+The first workflow (`43285761030`) could not schedule macOS 14: GitHub retired
+those runners on 2026-11-02. Commit `460d504` selects supported `macos-15`
+(Apple Silicon); `actionlint` 1.7.12 accepted the workflow.
+
+Run [43286572632](https://github.com/nalart11/Throne-GTK/actions/runs/43286572632)
+completed its Linux job successfully. On macOS, dependency checks, Rust format,
+workspace tests, Clippy and portable packaging guards passed. The Go suite
+failed in framework-link containment and DNS journal ACL checks. Go vet,
+shipped core/app build, IPC smoke and native DMG/PKG construction were skipped;
+none is established by this run. Duplicate `-lobjc` linker warnings were not
+the failing condition.
+
+The follow-up corrects canonical framework containment (`/var` versus
+`/private/var`) and distinguishes an absent ACL from failed metadata retrieval
+using `statx_np`/`fstatx_np` plus `filesec_query_property`. Helper, DNS journal
+and installer checks share that distinction; mutation grants and unreadable
+metadata still fail closed. Rust's native build tracks the new shared header.
+Portable regressions cover aliased ancestors and absence/error classification;
+Mac-only regressions exercise all three native ACL readers with absent, empty,
+deny, read-only, mutation and invalid-input fixtures. These native regressions
+have not yet run in the local Linux environment.
+
+Follow-up Linux checks passed: `GOTOOLCHAIN=go1.26.0 go test ./...`,
+`go vet ./...`, `go test -race ./helpertrust ./internal/sys` (all from `core`,
+same toolchain), `bash scripts/test-macos-packaging.sh`,
+`cargo fmt --all -- --check`, changed Go files' `gofmt` check and
+`git diff --check`. Logs: `/tmp/opencode/throne-macos-ci-fix/`.
+
 ## Acceptance blockers and limits
 
 - Constructors cannot be interrupted mid-call. Cancellation checks prevent
@@ -168,8 +198,10 @@ This is a development handoff, not production or macOS-stage approval.
 - DNS covers only the initial service/location. Migration and effective
   resolver behavior require real-Mac checks. No real-Mac DNS modification was
   performed during this work; leak protection is not established.
-- No Darwin build, helper registration, AppKit, TUN, DNS/IPv6 leak, sleep/wake,
-  clean-machine bundle, DMG/PKG, signing or notarization result is established.
+- Hosted macOS Rust tests compile the application, but helper registration,
+  AppKit interaction, TUN, DNS/IPv6 leaks, sleep/wake, clean-machine bundle,
+  DMG/PKG, Developer ID signing and notarization are not established. The first
+  native Go suite failed as recorded above.
 - The user authorized committing/pushing this handoff to `dev`. Hosted/native
   results must be read separately; successful local checks are not Mac evidence.
 - Synthetic fixtures establish configuration-policy compatibility, not remote
