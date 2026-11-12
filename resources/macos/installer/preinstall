@@ -1,0 +1,69 @@
+#!/bin/bash
+set -eu
+fail() { echo "Throne GTK: $*" >&2; exit 1; }
+[ "${3:-/}" = / ] || fail "Offline-volume installation is not supported."
+base='/Library/Application Support/Throne GTK'
+app="$base/Throne GTK.app"
+link='/Applications/Throne GTK.app'
+label=dev.nalart.ThroneGtk.helper
+acl_check="$(dirname "$0")/check-install-acl"
+# Package-owned native reader, never a mutable installed executable. Reject
+# mutation ACEs, including inherited grants, before Installer extracts anything.
+"$acl_check" --ancestors / /Library '/Library/Application Support' /Library/LaunchDaemons || fail 'Unsafe shared ancestor owner/mode/ACL; no shared directories will be repaired.'
+# Do not traverse redirected ancestors or overwrite another product's files.
+for dir in /Library '/Library/Application Support' /Applications /Library/LaunchDaemons; do
+    [ -d "$dir" ] && [ ! -L "$dir" ] || fail "Unsafe ancestor: $dir"
+done
+if [ -e "$base" ] || [ -L "$base" ]; then
+    "$acl_check" --tree "$base" || fail 'Existing private installation has unsafe ownership, modes or ACL mutation grants.'
+    [ ! -L "$base" ] && [ -f "$base/.throne-gtk-package" ] && [ ! -L "$base/.throne-gtk-package" ] || fail "Foreign install directory: $base"
+    [ "$(/usr/bin/stat -f %u "$base")" = 0 ] || fail "Install directory is not root-owned"
+    [ "$(/bin/cat "$base/.throne-gtk-package")" = "$(/bin/cat "$(dirname "$0")/mode")" ] || fail "Changing service mode requires explicit uninstall and user-context SMAppService unregister first."
+    [ -z "$(/usr/bin/find "$base" ! -type l \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail "Existing installation is not root-protected"
+fi
+if [ -e "$app" ] || [ -L "$app" ]; then
+    [ ! -L "$app" ] || fail "Bundle is a symlink"
+    /usr/bin/codesign --verify --deep --strict "$app" || fail "Existing bundle signature invalid"
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.ThroneGtk ] || fail "Foreign bundle"
+fi
+if [ -e "$link" ] || [ -L "$link" ]; then
+    if [ -d "$link" ] && [ ! -L "$link" ]; then
+        if /usr/bin/codesign --verify --deep --strict "$link" && \
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$link/Contents/Info.plist")" = dev.nalart.ThroneGtk ]; then
+            fail 'Verified legacy Throne GTK bundle detected. Unregister SMAppService through that app as its owning user, then move the old bundle aside manually and retry. No root execution or automatic deletion is performed.'
+        fi
+        fail 'Foreign or invalid /Applications bundle; nothing will be removed.'
+    fi
+    [ -L "$link" ] && [ "$(/usr/bin/readlink "$link")" = "$app" ] || fail "Legacy or foreign /Applications app. As its owning user, unregister SMAppService in the old app first; verify its signature and bundle ID, then move it aside manually. Installer never removes it or runs it as root."
+fi
+if [ -d "$base" ] && [ ! -f "$base/.throne-gtk-manual" ]; then
+    fail 'SMAppService upgrade requires unregistering as the logged-in user, then running the protected uninstall script with --sm-unregistered before reinstalling. This installer cannot prove an inactive registration was removed.'
+fi
+plist="/Library/LaunchDaemons/$label.plist"
+if [ -e "$plist" ] || [ -L "$plist" ]; then
+    "$acl_check" --nodes "$plist" || fail 'Existing launchd plist has unsafe ownership, modes or ACL mutation grants.'
+    [ ! -L "$plist" ] && [ -f "$base/.throne-gtk-manual" ] || fail "Foreign/legacy launchd plist; unregister the old service as its user before migration."
+    /usr/bin/cmp -s "$plist" "$base/manual-helper.plist" || fail "Modified launchd plist"
+fi
+if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+    [ -f "$base/.throne-gtk-manual" ] && [ -f "$plist" ] || fail "Existing SMAppService registration: unregister through the old app as the logged-in user before installing. bootout is NOT unregister."
+    # This is deliberately the final operation, after ALL ownership checks and
+    # before Installer can overwrite the payload. launchd's default process
+    # group cleanup must remain enabled (no AbandonProcessGroup=true).
+    /bin/launchctl bootout "system/$label" || fail "Could not stop owned helper; payload must not be replaced."
+    if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+        fail "Helper remains loaded after bootout; refusing replacement."
+    fi
+fi
+if [ -e "$app" ]; then
+    "$app/Contents/MacOS/throne-gtk-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; installed payload has not been replaced.'
+fi
+if [ ! -e "$base" ] && [ ! -L "$base" ]; then
+    # Shared ancestors were checked above. Normalize ONLY our newly created
+    # private directory, removing even benign inherited ACLs before extraction.
+    (umask 077; /bin/mkdir "$base") || fail 'Could not create protected private install directory.'
+    /bin/chmod -N "$base" || fail 'Could not remove inherited private ACL.'
+    /usr/sbin/chown root:wheel "$base" || fail 'Could not secure private directory ownership.'
+    /bin/chmod 755 "$base" || fail 'Could not secure private directory mode.'
+    "$acl_check" --tree "$base" || fail 'New private installation is not protected.'
+fi

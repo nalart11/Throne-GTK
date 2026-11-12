@@ -4,6 +4,7 @@
 //! [`Command`] and receives [`Event`], so connecting, testing two hundred servers,
 //! and updating a subscription do not freeze the window.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -178,6 +179,61 @@ struct Running {
     auto_members: Vec<(String, String)>,
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+enum TestKey {
+    Latency,
+    Speed(i64),
+}
+
+struct TestWorker {
+    generation: u64,
+    task: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+struct TestEvents {
+    generation: u64,
+    sender: mpsc::UnboundedSender<(u64, Event)>,
+}
+
+impl TestEvents {
+    async fn send(&self, event: Event) -> Result<(), mpsc::error::SendError<(u64, Event)>> {
+        self.sender.send((self.generation, event))
+    }
+}
+
+async fn cancel_tests(
+    workers: &mut HashMap<TestKey, TestWorker>,
+    events: &async_channel::Sender<Event>,
+) {
+    let drained: Vec<_> = workers.drain().collect();
+    for (_, worker) in &drained {
+        worker.task.abort();
+    }
+    for (key, worker) in drained {
+        let _ = worker.task.await;
+        let event = match key {
+            TestKey::Latency => Event::TestFinished { tested: 0 },
+            TestKey::Speed(id) => Event::SpeedResult {
+                id,
+                download: String::new(),
+                upload: String::new(),
+                country: String::new(),
+                latency: 0,
+                error: "отменено".into(),
+            },
+        };
+        let _ = events.send(event).await;
+    }
+}
+
+// Bound control-plane calls independently of the core's longer test timeout.
+async fn control<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(Duration::from_secs(2), future)
+        .await
+        .context("ядро не отвечает")?
+}
+
 async fn run(
     core_bin: PathBuf,
     runtime_dir: PathBuf,
@@ -185,21 +241,49 @@ async fn run(
     events: async_channel::Sender<Event>,
 ) {
     let mut running: Option<Running> = None;
+    let mut workers = HashMap::<TestKey, TestWorker>::new();
+    let mut subscriptions = tokio::task::JoinSet::new();
+    let mut subscription_generations = HashMap::new();
+    let (test_tx, mut test_rx) = mpsc::unbounded_channel();
+    let mut generation = 0u64;
     let mut poll = tokio::time::interval(Duration::from_secs(1));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
+            Some(outcome) = subscriptions.join_next(), if !subscriptions.is_empty() => {
+                if let Ok((gid, generation, result)) = outcome {
+                    if subscription_generations.get(&gid) == Some(&generation) {
+                        subscription_generations.remove(&gid);
+                        let _ = events.send(Event::Subscription { gid, result }).await;
+                    }
+                }
+            }
+            Some((generation, event)) = test_rx.recv() => {
+                let key = workers.iter().find_map(|(key, worker)|
+                    (worker.generation == generation).then_some(*key));
+                if let Some(key) = key {
+                    let finished = matches!(event, Event::TestFinished { .. } | Event::SpeedResult { .. });
+                    if finished {
+                        if let Some(worker) = workers.remove(&key) {
+                            let _ = worker.task.await;
+                        }
+                    }
+                    let _ = events.send(event).await;
+                }
+            }
             command = commands.recv() => {
                 let Some(command) = command else { break };
                 match command {
                     Command::Shutdown => {
+                        cancel_tests(&mut workers, &events).await;
                         if let Some(r) = running.take() {
                             r.core.shutdown().await;
                         }
                         break;
                     }
                     Command::Disconnect => {
+                        cancel_tests(&mut workers, &events).await;
                         if let Some(r) = running.take() {
                             r.core.shutdown().await;
                         }
@@ -229,14 +313,14 @@ async fn run(
                     }
                     Command::AutoRecheck => {
                         if let Some(r) = &running {
-                            let _ = r
+                            let _ = control(r
                                 .core
                                 .client
                                 .auto_selector_action(pb::AutoSelectorActionRequest {
                                     tag: Some(throne_config::generate::tags::PROXY.to_string()),
                                     action: Some("recheck".into()),
                                     member: None,
-                                })
+                                }))
                                 .await;
                         }
                     }
@@ -250,14 +334,14 @@ async fn run(
                                 .find(|(_, name)| *name == member)
                                 .map(|(tag, _)| tag.clone())
                                 .unwrap_or_default();
-                            let _ = r
+                            let _ = control(r
                                 .core
                                 .client
                                 .auto_selector_action(pb::AutoSelectorActionRequest {
                                     tag: Some(throne_config::generate::tags::PROXY.to_string()),
                                     action: Some("select".into()),
                                     member: Some(tag),
-                                })
+                                }))
                                 .await;
                         }
                     }
@@ -292,21 +376,32 @@ async fn run(
                     Command::TestLatency { profiles, ids, settings } => {
                         // The test starts its own core and does not affect the active
                         // one, so servers can be checked without dropping the connection.
-                        let events = events.clone();
+                        if let Some(worker) = workers.remove(&TestKey::Latency) {
+                            let mut old = HashMap::from([(TestKey::Latency, worker)]);
+                            cancel_tests(&mut old, &events).await;
+                        }
+                        generation += 1;
+                        let events = TestEvents { generation, sender: test_tx.clone() };
                         let core_bin = core_bin.clone();
                         let runtime_dir = runtime_dir.clone();
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             if let Err(e) = test_latency(&core_bin, &runtime_dir, profiles, ids, &settings, &events).await {
                                 let _ = events.send(Event::Error(format!("{e:#}"))).await;
                                 let _ = events.send(Event::TestFinished { tested: 0 }).await;
                             }
                         });
+                        workers.insert(TestKey::Latency, TestWorker { generation, task });
                     }
                     Command::SpeedTest { profile, id, settings } => {
-                        let events = events.clone();
+                        if let Some(worker) = workers.remove(&TestKey::Speed(id)) {
+                            let mut old = HashMap::from([(TestKey::Speed(id), worker)]);
+                            cancel_tests(&mut old, &events).await;
+                        }
+                        generation += 1;
+                        let events = TestEvents { generation, sender: test_tx.clone() };
                         let core_bin = core_bin.clone();
                         let runtime_dir = runtime_dir.clone();
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             if let Err(e) =
                                 speed_test(&core_bin, &runtime_dir, *profile, id, &settings, &events).await
                             {
@@ -322,11 +417,10 @@ async fn run(
                                     .await;
                             }
                         });
+                        workers.insert(TestKey::Speed(id), TestWorker { generation, task });
                     }
                     Command::StopTest => {
-                        if let Some(r) = &running {
-                            let _ = r.core.client.stop_test().await;
-                        }
+                        cancel_tests(&mut workers, &events).await;
                     }
                     Command::FetchSubscription {
                         gid,
@@ -335,8 +429,10 @@ async fn run(
                         send_hwid,
                         custom_hwid_params,
                     } => {
-                        let events = events.clone();
-                        tokio::spawn(async move {
+                        generation += 1;
+                        let request_generation = generation;
+                        subscription_generations.insert(gid, request_generation);
+                        subscriptions.spawn(async move {
                             let result = fetch_subscription(
                                 &url,
                                 &user_agent,
@@ -345,7 +441,7 @@ async fn run(
                             )
                                 .await
                                 .map_err(|e| format!("{e:#}"));
-                            let _ = events.send(Event::Subscription { gid, result }).await;
+                            (gid, request_generation, result)
                         });
                     }
                 }
@@ -353,6 +449,14 @@ async fn run(
 
             _ = poll.tick() => {
                 let Some(r) = &mut running else { continue };
+
+                if r.core.client.is_closed() {
+                    if let Some(r) = running.take() {
+                        r.core.shutdown().await;
+                    }
+                    let _ = events.send(Event::Status(Status::Disconnected)).await;
+                    continue;
+                }
 
                 // The core may have crashed on its own, for example because of a TUN failure.
                 if let Some(status) = r.core.exited() {
@@ -365,7 +469,9 @@ async fn run(
                     continue;
                 }
 
-                if let Ok(stats) = r.core.client.query_stats().await {
+                let outcome: Result<()> = async {
+                {
+                    let stats = control(r.core.client.query_stats()).await.context("статистика ядра")?;
                     let sum = |m: &std::collections::HashMap<String, i64>| -> i64 {
                         r.tags.iter().filter_map(|t| m.get(t)).sum()
                     };
@@ -376,7 +482,8 @@ async fn run(
                 }
 
                 if !r.auto_members.is_empty() {
-                    if let Ok(response) = r.core.client.query_auto_selectors().await {
+                    {
+                        let response = control(r.core.client.query_auto_selectors()).await.context("автовыбор ядра")?;
                         if let Some(group) = response.groups.first() {
                             let name_of = |tag: &str| -> String {
                                 r.auto_members
@@ -398,7 +505,8 @@ async fn run(
                     }
                 }
 
-                if let Ok(conns) = r.core.client.query_connections().await {
+                {
+                    let conns = control(r.core.client.query_connections()).await.context("соединения ядра")?;
                     let list = conns
                         .active
                         .into_iter()
@@ -417,9 +525,37 @@ async fn run(
                 }
 
                 let _ = r.profile_id;
+                Ok(())
+                }.await;
+                if let Err(error) = outcome {
+                    if let Some(r) = running.take() {
+                        r.core.shutdown().await;
+                    }
+                    let _ = events.send(Event::Status(Status::Failed(format!("{error:#}")))).await;
+                }
             }
         }
     }
+    cancel_tests(&mut workers, &events).await;
+    cancel_background(&mut subscriptions).await;
+    if let Some(r) = running {
+        r.core.shutdown().await;
+    }
+}
+
+async fn cancel_background<T: Send + 'static>(tasks: &mut tokio::task::JoinSet<T>) {
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+}
+
+async fn require_vpn_privilege(core: &Core, core_bin: &Path) -> Result<()> {
+    if !control(core.client.is_privileged())
+        .await
+        .context("проверка прав ядра VPN")?
+    {
+        anyhow::bail!(vpn_privilege_hint(core_bin));
+    }
+    Ok(())
 }
 
 fn load_request(generated: &GeneratedConfig, settings: &Settings) -> pb::LoadConfigReq {
@@ -444,16 +580,22 @@ async fn connect(
         Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?
     };
 
-    if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
-        let core = core;
-        core.shutdown().await;
-        anyhow::bail!(vpn_privilege_hint(core_bin));
+    if settings.mode.is_vpn() {
+        if let Err(error) = require_vpn_privilege(&core, core_bin).await {
+            core.shutdown().await;
+            return Err(error);
+        }
     }
 
-    core.client
+    let outcome = core
+        .client
         .start(load_request(&generated, settings))
         .await
-        .context("запуск конфига в ядре")?;
+        .context("запуск конфига в ядре");
+    if let Err(error) = outcome {
+        core.shutdown().await;
+        return Err(error);
+    }
 
     Ok(Running {
         core,
@@ -483,15 +625,22 @@ async fn connect_auto(
         Core::spawn(core_bin, runtime_dir, settings.log_level == "debug").await?
     };
 
-    if settings.mode.is_vpn() && !core.client.is_privileged().await.unwrap_or(false) {
-        core.shutdown().await;
-        anyhow::bail!(vpn_privilege_hint(core_bin));
+    if settings.mode.is_vpn() {
+        if let Err(error) = require_vpn_privilege(&core, core_bin).await {
+            core.shutdown().await;
+            return Err(error);
+        }
     }
 
-    core.client
+    let outcome = core
+        .client
         .start(load_request(&generated, settings))
         .await
-        .context("запуск конфига в ядре")?;
+        .context("запуск конфига в ядре");
+    if let Err(error) = outcome {
+        core.shutdown().await;
+        return Err(error);
+    }
 
     let auto_members: Vec<(String, String)> = generated
         .tags
@@ -553,7 +702,7 @@ async fn test_latency(
     profiles: Vec<Profile>,
     ids: Vec<i64>,
     settings: &Settings,
-    events: &async_channel::Sender<Event>,
+    events: &TestEvents,
 ) -> Result<()> {
     if profiles.is_empty() {
         let _ = events.send(Event::TestFinished { tested: 0 }).await;
@@ -601,7 +750,9 @@ async fn test_latency(
     }
 
     core.shutdown().await;
-    let _ = events.send(Event::TestFinished { tested }).await;
+    if outcome.is_ok() {
+        let _ = events.send(Event::TestFinished { tested }).await;
+    }
     outcome.map(|_| ())
 }
 
@@ -613,7 +764,7 @@ async fn speed_test(
     profile: Profile,
     id: i64,
     settings: &Settings,
-    events: &async_channel::Sender<Event>,
+    events: &TestEvents,
 ) -> Result<()> {
     let profiles = [profile];
     let generated =
@@ -629,36 +780,37 @@ async fn speed_test(
     request.xray_config = Some(generated.xray_config.clone());
 
     // While the core is measuring, query it for progress.
-    let progress = {
-        let client = core.client.clone();
-        let events = events.clone();
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_millis(700));
-            loop {
-                tick.tick().await;
-                let Ok(state) = client.query_speed_test().await else {
-                    break;
-                };
-                if !state.is_running() {
-                    continue;
-                }
-                let Some(result) = &state.result else {
-                    continue;
-                };
-                let stage = if !result.dl_speed().is_empty() {
-                    format!("приём {}", result.dl_speed())
-                } else if !result.server_name().is_empty() {
-                    format!("сервер {}", result.server_name())
-                } else {
-                    "замеряю…".to_string()
-                };
-                let _ = events.send(Event::SpeedProgress { id, stage }).await;
+    let progress = async {
+        let client = &core.client;
+        let mut tick = tokio::time::interval(Duration::from_millis(700));
+        loop {
+            tick.tick().await;
+            let Ok(state) = client.query_speed_test().await else {
+                break;
+            };
+            if !state.is_running() {
+                continue;
             }
-        })
+            let Some(result) = &state.result else {
+                continue;
+            };
+            let stage = if !result.dl_speed().is_empty() {
+                format!("приём {}", result.dl_speed())
+            } else if !result.server_name().is_empty() {
+                format!("сервер {}", result.server_name())
+            } else {
+                "замеряю…".to_string()
+            };
+            let _ = events.send(Event::SpeedProgress { id, stage }).await;
+        }
     };
 
-    let outcome = core.client.speed_test(request).await;
-    progress.abort();
+    // Progress is a child future, not a detached task: dropping/aborting this
+    // worker drops both the request and its progress poller before the core.
+    let outcome = tokio::select! {
+        outcome = core.client.speed_test(request) => outcome,
+        _ = progress => Err(anyhow::anyhow!("канал замера закрыт")),
+    };
     core.shutdown().await;
 
     let response = outcome?;
@@ -694,4 +846,87 @@ async fn fetch_subscription(
         parsed.info = subscription::format_userinfo(&userinfo);
     }
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    struct Dropped(Arc<AtomicBool>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn background_cancellation_joins_and_drops_network_work() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let guard = Dropped(flag.clone());
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        });
+        cancel_background(&mut tasks).await;
+        assert!(tasks.is_empty());
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn cancellation_awaits_workers_and_completes_each_type_once() {
+        let (events, receiver) = async_channel::unbounded();
+        let mut workers = HashMap::new();
+        let mut dropped = Vec::new();
+        for (generation, key) in [(1, TestKey::Latency), (2, TestKey::Speed(7))] {
+            let flag = Arc::new(AtomicBool::new(false));
+            let guard = Dropped(flag.clone());
+            let task = tokio::spawn(async move {
+                let _guard = guard;
+                std::future::pending::<()>().await;
+            });
+            workers.insert(key, TestWorker { generation, task });
+            dropped.push(flag);
+        }
+        cancel_tests(&mut workers, &events).await;
+        assert!(workers.is_empty());
+        assert!(dropped.iter().all(|flag| flag.load(Ordering::SeqCst)));
+        assert_eq!(receiver.len(), 2);
+        cancel_tests(&mut workers, &events).await;
+        assert_eq!(receiver.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cancelled_generation_cannot_forward_queued_results() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (events, _) = async_channel::unbounded();
+        let task = tokio::spawn(std::future::pending());
+        let mut workers = HashMap::from([(
+            TestKey::Latency,
+            TestWorker {
+                generation: 1,
+                task,
+            },
+        )]);
+        let old_events = TestEvents {
+            generation: 1,
+            sender,
+        };
+        old_events
+            .send(Event::LatencyResult {
+                id: 9,
+                latency: 100,
+            })
+            .await
+            .unwrap();
+        cancel_tests(&mut workers, &events).await;
+        let (generation, _) = receiver.recv().await.unwrap();
+        assert!(!workers
+            .values()
+            .any(|worker| worker.generation == generation));
+    }
 }

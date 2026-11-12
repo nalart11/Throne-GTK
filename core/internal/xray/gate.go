@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/xtls/xray-core/core"
@@ -110,7 +111,7 @@ func StartGate(config string, idle time.Duration, prepare func(*core.Instance) e
 			for _, bridge := range gate.bridges {
 				_ = bridge.listener.Close()
 			}
-			return nil, fmt.Errorf("xray gate: cannot take over %s: %w", pair.gate, listenErr)
+			return nil, gateListenError("take over inbound port", listenErr)
 		}
 		gate.bridges = append(gate.bridges, gateBridge{listener: listener, target: pair.target})
 	}
@@ -129,12 +130,12 @@ func StartGate(config string, idle time.Duration, prepare func(*core.Instance) e
 func remapInbounds(config string) (string, []gateAddrPair, error) {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(config), &root); err != nil {
-		return "", nil, fmt.Errorf("xray gate: parse config: %w", err)
+		return "", nil, configError("gate parse config", err)
 	}
 	var inbounds []map[string]any
 	if raw, ok := root["inbounds"]; ok {
 		if err := json.Unmarshal(raw, &inbounds); err != nil {
-			return "", nil, fmt.Errorf("xray gate: parse inbounds: %w", err)
+			return "", nil, configError("gate parse inbounds", err)
 		}
 	}
 	if len(inbounds) == 0 {
@@ -166,7 +167,7 @@ func remapInbounds(config string) (string, []gateAddrPair, error) {
 		}
 		probe, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 		if err != nil {
-			return "", nil, fmt.Errorf("xray gate: no free port on %s: %w", host, err)
+			return "", nil, gateListenError("probe inbound listen address", err)
 		}
 		probes = append(probes, probe)
 		moved := probe.Addr().(*net.TCPAddr).Port
@@ -179,14 +180,23 @@ func remapInbounds(config string) (string, []gateAddrPair, error) {
 
 	patched, err := json.Marshal(inbounds)
 	if err != nil {
-		return "", nil, err
+		return "", nil, configError("gate encode inbounds", err)
 	}
 	root["inbounds"] = patched
 	out, err := json.Marshal(root)
 	if err != nil {
-		return "", nil, err
+		return "", nil, configError("gate encode config", err)
 	}
 	return string(out), pairs, nil
+}
+
+// Preserve useful OS bind diagnostics without echoing a config-supplied host.
+func gateListenError(stage string, err error) error {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return fmt.Errorf("xray gate: %s: %w", stage, errno)
+	}
+	return fmt.Errorf("xray gate: %s: invalid or unavailable listen address", stage)
 }
 
 // Instance is the live instance, or nil while the gate is cold. Callers use it

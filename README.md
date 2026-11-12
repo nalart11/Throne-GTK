@@ -4,6 +4,12 @@
 libadwaita вместо Qt. Ядро — то же самое: sing-box 1.13 и Xray, собранные из
 исходников Throne.
 
+**Статус кроссплатформенной доработки:** этап 0 не принят, macOS не завершена,
+Windows остаётся следующим, закрытым этапом. План —
+[CROSS_PLATFORM_PLAN.md](docs/CROSS_PLATFORM_PLAN.md), реальные результаты —
+[STAGE0_REPORT.md](docs/STAGE0_REPORT.md), проверки на Mac —
+[MACOS_VALIDATION.md](docs/MACOS_VALIDATION.md).
+
 ## Что это
 
 Кроссплатформенный клиент прокси для Linux, macOS и Windows. Поддерживает VLESS (включая Reality и XTLS Vision),
@@ -38,6 +44,10 @@ throne-gtk (Rust, GTK4)                 throne-gtk-core (Go)
 outbound Xray. Промежуточного представления протоколов нет — новый протокол
 sing-box начинает работать без изменений в коде.
 
+Исключение: привилегированный macOS worker принимает только явно разрешённую
+схему конфигурации; произвольные расширения и native Xray не-VLESS отклоняются.
+Обычное ядро сохраняет прежнюю конфигурационную поверхность.
+
 ## Сборка
 
 Нужны: Rust, Go, protoc, GTK4 ≥ 4.12, libadwaita ≥ 1.5 и `just`.
@@ -66,6 +76,13 @@ RELEASE=1 just build
 
 ### macOS
 
+Для VPN используется защищённая установка полного bundle через PKG:
+`/Library/Application Support/Throne GTK/Throne GTK.app`; в `/Applications`
+создаётся только ссылка. GUI не требует root. Не меняйте глобальные права
+`/Applications` ради обхода проверки. Нативные проверки установки, helper и
+VPN ещё обязательны: [передача тестирования Mac](docs/MACOS_HANDOFF.md),
+[политика helper](core/helpertrust/README.md).
+
 ```sh
 brew install libadwaita protobuf just dylibbundler librsvg
 RELEASE=1 just build
@@ -86,7 +103,8 @@ open dist/throne-gtk-macos.dmg
 Перетащите **Throne GTK** из открывшегося образа в `Applications`. Команда
 собирает release-бинарники, переносит внутрь `.app` динамические библиотеки GTK,
 создаёт `.icns`, подписывает bundle ad-hoc и пишет образ в
-`dist/throne-gtk-macos.dmg`. На компьютере пользователя Homebrew не требуется.
+`dist/throne-gtk-macos.dmg`. Отсутствие зависимости от Homebrew нужно отдельно
+подтвердить на чистом Mac; сборка bundle сама по себе этого не доказывает.
 
 Ad-hoc подпись удобна для своей машины. Для публичной раздачи укажите сертификат
 Developer ID и профиль `notarytool`, заранее сохранённый в Keychain:
@@ -110,9 +128,9 @@ Service Management. macOS попросит разрешить **Throne GTK** в 
 повторите подключение. GUI и режим «Прокси» всегда работают от обычного
 пользователя; root-права получает только отдельный процесс ядра для TUN.
 
-Root-helper работает только из установленного `.app`: при разработке запускайте
-`./build/throne-gtk` в режиме «Прокси» либо соберите DMG и перенесите приложение
-в `/Applications`.
+Root-helper работает только из защищённого `.app`, установленного через PKG.
+Копирование DMG в `/Applications` не даёт VPN-привилегий; при разработке
+`./build/throne-gtk` можно запускать в режиме локального прокси.
 
 Для личной установки без Developer ID можно собрать отдельный локальный
 установщик:
@@ -122,11 +140,16 @@ just installer
 open dist/throne-gtk-local-installer.pkg
 ```
 
-Установщик один раз запросит пароль администратора, положит приложение в
-`/Applications` и зарегистрирует системный root-helper. После этого GUI и
-обычные запуски из терминала работают без `sudo`. Такой PKG не нотариализован и
+Локальный установщик запросит права администратора, положит полный `.app` в
+защищённый каталог выше, создаст ссылку в `/Applications` и явно зарегистрирует
+manual launchd helper. GUI запускается без `sudo`. Такой PKG не нотариализован и
 предназначен для установки на собственный Mac, которому вы доверяете, а не для
-публичного распространения. Перед установкой и обновлением закройте Throne GTK.
+публичного распространения. Подписанный PKG собирается через
+`just installer-release` с `CODESIGN_IDENTITY`, `INSTALLER_SIGN_IDENTITY` и
+`NOTARY_PROFILE`; этот режим сохраняет SMAppService. Наличие команды не означает,
+что подпись или notarization фактически выполнены. Перед установкой/обновлением
+закройте Throne GTK; миграция старой установки и удаление описаны в
+[MACOS_HANDOFF.md](docs/MACOS_HANDOFF.md).
 
 ### Windows
 

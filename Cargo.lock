@@ -2097,8 +2097,11 @@ dependencies = [
  "anyhow",
  "bytes",
  "cc",
+ "libc",
  "prost",
  "prost-build",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]

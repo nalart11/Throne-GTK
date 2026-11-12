@@ -12,7 +12,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
-for tool in brew dylibbundler rsvg-convert iconutil hdiutil codesign plutil otool file perl; do
+for tool in brew dylibbundler rsvg-convert iconutil hdiutil codesign plutil otool file perl python3; do
     if ! command -v "$tool" >/dev/null; then
         echo "Не найдена команда $tool" >&2
         echo "Установите зависимости: brew install dylibbundler librsvg" >&2
@@ -117,6 +117,11 @@ if [[ "$unbundled" -ne 0 ]]; then
     exit 1
 fi
 
+python3 "$root/scripts/validate-macos-bundle.py" "$app"
+if [[ -n "${NOTARY_PROFILE:-}" && "$identity" = - ]]; then
+    echo 'Notarization requires a Developer ID signing identity' >&2
+    exit 1
+fi
 sign_args=(--force --sign "$identity")
 if [[ "$identity" != "-" ]]; then
     sign_args+=(--timestamp --options runtime)

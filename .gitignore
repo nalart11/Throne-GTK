@@ -12,3 +12,4 @@
 *.db-shm
 *.db-wal
 *.log
+.slim/deepwork/

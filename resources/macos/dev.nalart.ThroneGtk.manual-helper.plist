@@ -6,7 +6,7 @@
     <string>dev.nalart.ThroneGtk.helper</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Throne GTK.app/Contents/MacOS/throne-gtk-core</string>
+        <string>/Library/Application Support/Throne GTK/Throne GTK.app/Contents/MacOS/throne-gtk-core</string>
         <string>--helper</string>
     </array>
     <key>RunAtLoad</key>

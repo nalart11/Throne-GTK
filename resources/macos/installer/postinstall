@@ -1,29 +1,30 @@
 #!/bin/bash
 set -eu
-
-label="dev.nalart.ThroneGtk.helper"
-target_volume="${3:-/}"
-app="$target_volume/Applications/Throne GTK.app"
-plist="$target_volume/Library/LaunchDaemons/$label.plist"
-
-/bin/chmod 755 "$app/Contents/MacOS/throne-gtk" "$app/Contents/MacOS/throne-gtk-core"
-/usr/sbin/chown root:wheel "$plist"
-/bin/chmod 644 "$plist"
-
-# A local unsigned package is an explicit administrator-authorised install.
-# Remove download quarantine so Gatekeeper does not reject its ad-hoc app on
-# the same Mac immediately after Installer has completed.
-/usr/bin/xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
-
-# Do not try to activate a service while installing onto an offline volume.
-if [ "$target_volume" != "/" ]; then
-    exit 0
+[ "${3:-/}" = / ] || exit 1
+base='/Library/Application Support/Throne GTK'
+app="$base/Throne GTK.app"
+label=dev.nalart.ThroneGtk.helper
+# Only our private subtree is changed; never chmod shared ancestors.
+/usr/sbin/chown -R root:wheel "$base"
+/bin/chmod -RN "$base"
+/bin/chmod -R go-w "$base"
+/bin/chmod 755 "$base" "$app" "$app/Contents/MacOS/throne-gtk" "$app/Contents/MacOS/throne-gtk-core"
+link='/Applications/Throne GTK.app'
+if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+    /bin/ln -s "$app" "$link"
+elif [ ! -L "$link" ] || [ "$(/usr/bin/readlink "$link")" != "$app" ]; then
+    echo 'Refusing to replace foreign /Applications item' >&2
+    exit 1
 fi
-
-/bin/launchctl bootout "system/$label" 2>/dev/null || true
-/bin/rm -f "/var/run/$label.sock"
-/bin/launchctl bootstrap system "$plist"
-/bin/launchctl enable "system/$label"
-/bin/launchctl kickstart -k "system/$label"
-
-exit 0
+if [ -f "$base/.throne-gtk-manual" ]; then
+    plist="/Library/LaunchDaemons/$label.plist"
+    if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+        echo 'Unexpected loaded helper after preinstall; refusing activation' >&2
+        exit 1
+    fi
+    /bin/launchctl bootstrap system "$plist"
+    /bin/launchctl enable "system/$label"
+    /bin/launchctl kickstart -k "system/$label"
+else
+    echo 'Open Throne GTK as the logged-in user to register SMAppService; approve in System Settings if requested.'
+fi

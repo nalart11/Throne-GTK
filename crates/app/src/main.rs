@@ -31,6 +31,23 @@ use throne_store::Store;
 const APP_ID: &str = "dev.nalart.ThroneGtk";
 
 fn main() -> glib::ExitCode {
+    #[cfg(target_os = "macos")]
+    if std::env::args_os()
+        .skip(1)
+        .any(|arg| arg == "--unregister-helper")
+    {
+        return match throne_ipc::unregister_helper() {
+            Ok(()) => {
+                println!("Service Management helper unregistered. You can now replace or remove the installed bundle.");
+                glib::ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("Helper unregister failed: {error:#}");
+                glib::ExitCode::FAILURE
+            }
+        };
+    }
+
     // Create the event channel before the log subscriber: lines written during
     // startup must reach the window log rather than disappear.
     let (events_tx, events_rx) = async_channel::unbounded::<engine::Event>();

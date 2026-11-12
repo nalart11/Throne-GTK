@@ -68,7 +68,12 @@ dmg:
 # administrator prompt. It is intended for personal use without Developer ID.
 [group('packaging')]
 installer: dmg
-    ./scripts/package-macos-installer.sh
+    ./scripts/package-macos-installer.sh --dev-manual
+
+# Developer ID application/installer identities and notary Keychain profile required.
+[group('packaging')]
+installer-release: dmg
+    ./scripts/package-macos-installer.sh --release
 
 # Build the interface (Rust, GTK4) [set RELEASE=1 to enable release build]
 [group('build')]
@@ -117,7 +122,8 @@ fetch-cronet:
     fi
 
     mkdir -p build
-    cp "$library" "build/${library_name}"
+    # Go module-cache libraries are read-only; keep repeated builds writable.
+    install -m 644 "$library" "build/${library_name}"
     echo "${library_name} → build/"
 
 # Tests
@@ -138,6 +144,21 @@ selftest:
     cp "target/debug/examples/selftest${suffix}" "target/selftest/throne-gtk${suffix}"
     cp "build/throne-gtk-core${suffix}" target/selftest/
     "./target/selftest/throne-gtk${suffix}"
+
+# Loopback-only IPC/lifecycle smoke; uses the existing core without rebuilding Go.
+[group('test')]
+ipc-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suffix=""
+    [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && suffix=".exe"
+    cargo build --example ipc_smoke -p throne-app
+    test -x "target/debug/examples/ipc_smoke${suffix}"
+    test -x "build/throne-gtk-core${suffix}"
+    mkdir -p target/ipc-smoke
+    cp "target/debug/examples/ipc_smoke${suffix}" "target/ipc-smoke/throne-gtk${suffix}"
+    cp "build/throne-gtk-core${suffix}" "target/ipc-smoke/throne-gtk-core${suffix}"
+    "./target/ipc-smoke/throne-gtk${suffix}"
 
 # Clean build data
 clean:

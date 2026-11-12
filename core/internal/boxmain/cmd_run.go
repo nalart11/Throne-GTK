@@ -3,6 +3,8 @@ package boxmain
 import (
 	"ThroneGtkCore/internal/boxbox"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	runtimeDebug "runtime/debug"
@@ -44,7 +46,13 @@ func parseConfig(ctx context.Context, configContent []byte) (*option.Options, er
 	)
 	options, err := json.UnmarshalExtendedContext[option.Options](ctx, configContent)
 	if err != nil {
-		return nil, E.Cause(err, "decode config at ", string(configContent))
+		// Decoder errors can include user-controlled field names and values.
+		// Do not retain or wrap them, even when the source is omitted.
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			return nil, fmt.Errorf("decode config: invalid JSON syntax at byte offset %d", syntaxError.Offset)
+		}
+		return nil, errors.New("decode config: invalid configuration")
 	}
 	return &options, nil
 }
