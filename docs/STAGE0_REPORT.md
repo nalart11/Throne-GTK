@@ -179,6 +179,27 @@ same toolchain), `bash scripts/test-macos-packaging.sh`,
 `cargo fmt --all -- --check`, changed Go files' `gofmt` check and
 `git diff --check`. Logs: `/tmp/opencode/throne-macos-ci-fix/`.
 
+Run [43291644145](https://github.com/nalart11/Throne-GTK/actions/runs/43291644145)
+at `d31297d` passed Linux again. On macOS, Rust tests/Clippy, Go tests/vet
+and the shipped core/application build now passed. The IPC smoke then failed
+before spawning its first core: the nested temporary socket pathname exceeded
+Darwin's Unix-domain socket limit. Native DMG/PKG construction was skipped.
+These results establish compilation and the executed unit checks, not GUI,
+helper, TUN or bundle installation behavior.
+
+The follow-up IPC allocator fix validates the pathname with the target's
+`SocketAddr::from_pathname`. An overlong runtime root falls back to a fresh,
+canonical, private `0700` directory under `/tmp`; the endpoint's existing guard
+still owns cleanup. No shared or predictable socket filename is introduced.
+The regression covers multibyte path lengths, simultaneous endpoints, socket
+binding/permissions, independent cleanup and preservation of unrelated files.
+Linux checks passed: `cargo fmt --all -- --check`, `cargo test --workspace`
+(97 tests), `cargo clippy -p throne-ipc --all-targets` (one existing needless-borrow
+warning), `just ipc-smoke`, and `git diff --check`. A second smoke run with a
+generated 176-byte UTF-8 `TMPDIR` also passed. Logs are in
+`/tmp/opencode/throne-ipc-length-checks/`. Native execution of this correction
+awaits the next hosted run; the earlier failure above is historical evidence.
+
 ## Acceptance blockers and limits
 
 - Constructors cannot be interrupted mid-call. Cancellation checks prevent
@@ -198,10 +219,10 @@ same toolchain), `bash scripts/test-macos-packaging.sh`,
 - DNS covers only the initial service/location. Migration and effective
   resolver behavior require real-Mac checks. No real-Mac DNS modification was
   performed during this work; leak protection is not established.
-- Hosted macOS Rust tests compile the application, but helper registration,
+- Hosted macOS checks compile the shipped core and application, but helper registration,
   AppKit interaction, TUN, DNS/IPv6 leaks, sleep/wake, clean-machine bundle,
-  DMG/PKG, Developer ID signing and notarization are not established. The first
-  native Go suite failed as recorded above.
+  DMG/PKG, Developer ID signing and notarization are not established. The native
+  Go suite now passes; the IPC pathname correction still needs its native rerun.
 - The user authorized committing/pushing this handoff to `dev`. Hosted/native
   results must be read separately; successful local checks are not Mac evidence.
 - Synthetic fixtures establish configuration-policy compatibility, not remote

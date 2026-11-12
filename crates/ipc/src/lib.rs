@@ -235,6 +235,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn long_runtime_parent_falls_back_with_private_isolated_cleanup() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        // Multibyte names: socket limits count bytes, not characters.
+        let long = root.path().join("é".repeat(60));
+        std::fs::create_dir(&long).unwrap();
+        let foreign = long.join("s");
+        std::fs::write(&foreign, b"do not remove").unwrap();
+        let first = Endpoint::create(&long).unwrap();
+        let second = Endpoint::create(&long).unwrap();
+        assert!(!first.path.starts_with(&long));
+        assert_ne!(first.path, second.path);
+        let first_dir = first.path.parent().unwrap().to_owned();
+        let second_dir = second.path.parent().unwrap().to_owned();
+        assert_eq!(std::fs::canonicalize(&first_dir).unwrap(), first_dir);
+        assert_eq!(
+            std::fs::metadata(&first_dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let listener = UnixListener::bind(&first.path).unwrap();
+        let other_listener = UnixListener::bind(&second.path).unwrap();
+        std::fs::set_permissions(&first.path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&first.path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        drop(listener);
+        drop(first);
+        assert!(!first_dir.exists());
+        assert!(second_dir.exists());
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"do not remove");
+        drop(other_listener);
+        drop(second);
+        assert!(!second_dir.exists());
+    }
+
+    #[tokio::test]
     async fn endpoints_are_private_isolated_and_owned() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
@@ -322,10 +360,25 @@ impl Endpoint {
             // TempDir atomically creates a fresh private 0700 directory. Its guard
             // exists before any await, including helper startup and accept.
             std::fs::create_dir_all(socket_dir)?;
-            let directory = tempfile::Builder::new()
-                .prefix("c-")
-                .permissions(std::fs::Permissions::from_mode(0o700))
-                .tempdir_in(socket_dir)?;
+            let create = |parent: &Path| -> Result<tempfile::TempDir> {
+                // Pass a canonical path to the helper: on macOS /tmp itself is
+                // a symlink, and helper validation rejects symlink ancestors.
+                let parent = std::fs::canonicalize(parent)?;
+                Ok(tempfile::Builder::new()
+                    .prefix("c-")
+                    .permissions(std::fs::Permissions::from_mode(0o700))
+                    .tempdir_in(parent)?)
+            };
+            let mut directory = create(socket_dir)?;
+            // Match the target's sockaddr_un limit (including the terminating
+            // NUL), measured in OS bytes rather than Unicode characters. A long
+            // configured runtime root must not make IPC impossible. Never use a
+            // shared socket name: the fallback still owns a fresh 0700 TempDir.
+            if std::os::unix::net::SocketAddr::from_pathname(directory.path().join("s")).is_err() {
+                directory = create(Path::new("/tmp"))?;
+            }
+            std::os::unix::net::SocketAddr::from_pathname(directory.path().join("s"))
+                .context("IPC socket path exceeds the target Unix socket limit")?;
             Ok(Self {
                 path: directory.path().join("s"),
                 _directory: directory,
