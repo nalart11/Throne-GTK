@@ -19,6 +19,23 @@ def bind_fixture_socket(control, path):
             os.close(previous)
 
 r = pathlib.Path(sys.argv[1])
+# Exercise the wrapper's real defaults without invoking macOS tools. just build
+# writes the core under build/, not the native Swift frontend's .build directory.
+wrapper = r/'scripts/package-macos.sh'
+defaults = wrapper.read_text().split('if [[ "$(uname -s)" != Darwin ]]', 1)[0]
+assert 'go build -o "../build/nolurix-core${suffix}"' in (r/'Justfile').read_text()
+for override in (None, str(r/'custom-core')):
+    env = dict(os.environ)
+    env.pop('NOLURIX_CORE_PATH', None)
+    if override is not None:
+        env['NOLURIX_CORE_PATH'] = override
+    # Preserve BASH_SOURCE-based root resolution by sourcing a temporary script
+    # next to the production wrapper, rather than evaluating it via bash -c.
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', dir=wrapper.parent) as script:
+        script.write(defaults + '\nprintf "%s" "$NOLURIX_CORE_PATH"')
+        script.flush()
+        actual = subprocess.check_output(['bash', script.name], env=env, text=True)
+    assert actual == (override or str(r/'build/nolurix-core')), actual
 fixed = '/Library/Application Support/Nolurix/Nolurix.app'
 # Linux cannot compile ServiceManagement, but it can catch shared-header symbol
 # drift in the Objective-C adapter before a Darwin compiler is available.

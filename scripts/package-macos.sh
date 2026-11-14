@@ -3,7 +3,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export NOLURIX_GUI_PATH="${NOLURIX_GUI_PATH:-$root/native/macos/.build/nolurix}"
-export NOLURIX_CORE_PATH="${NOLURIX_CORE_PATH:-$root/native/macos/.build/nolurix-core}"
+export NOLURIX_CORE_PATH="${NOLURIX_CORE_PATH:-$root/build/nolurix-core}"
 export NOLURIX_RESOURCES_PATH="${NOLURIX_RESOURCES_PATH:-$root/native/macos/.build/Resources}"
 out="${NOLURIX_PACKAGE_OUT:-$root/dist}"
 export CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-${NOLURIX_CODESIGN_IDENTITY:--}}"

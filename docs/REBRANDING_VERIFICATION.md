@@ -95,6 +95,13 @@ not files needed to build or run Nolurix.
 
 ## Unavailable checks and known limits
 
+- Post-push run `43619390757` passed Linux and the native macOS build/tests/IPC,
+  but failed macOS packaging: the wrapper looked for the core in the Swift
+  output directory instead of `build/nolurix-core`. The wrapper default now
+  matches both `just build` and the native assembler; portable regression tests
+  execute its default/explicit-override resolution. This local test does not
+  establish successful DMG/PKG creation; a fresh macOS CI run must confirm it.
+
 - Final focused review found and fixed two regressions: macOS adapter/header
   symbol mismatch and source-install retry after denied capability authorization.
   Both now have passing portable regression checks. The additional exhaustive
