@@ -27,15 +27,29 @@ Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscri
 
 ## Interface
 
-### Profiles and groups
+### Linux · GTK4 / libadwaita
+
+**Profiles and groups**
+
+![Throne GTK Linux profiles interface with demonstration data](docs/screenshots/linux-profiles.png)
+
+**Routing rules**
+
+![Throne GTK Linux routing rules with demonstration data](docs/screenshots/linux-routing.png)
+
+*Captured on Linux with the desktop's GTK styling. Fonts, icons, and colors may vary with your theme.*
+
+### macOS · SwiftUI / AppKit
+
+**Profiles and groups**
 
 ![Throne GTK macOS profiles interface with demonstration data](docs/screenshots/macos-profiles.png)
 
-### Routing rule editor
+**Routing rule editor**
 
 ![Throne GTK macOS routing rule editor with demonstration data](docs/screenshots/macos-routing-rule.png)
 
-*macOS screenshots with demonstration data. No live VPN connection is shown. Linux and Windows use a separate GTK interface.*
+*All screenshots use demonstration data; no live VPN connection is shown. macOS has a separate native interface; Linux and Windows use GTK.*
 
 ## Features
 
