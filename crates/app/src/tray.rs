@@ -54,12 +54,12 @@ impl ksni::Tray for Icon {
     }
 
     fn title(&self) -> String {
-        "Throne GTK".into()
+        "Nolurix".into()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Throne GTK".into(),
+            title: "Nolurix".into(),
             description: match &self.connected {
                 Some(name) => crate::tr_format!("Подключено: {name}", "Connected: {name}"),
                 None => crate::i18n::tr("Не подключено", "Disconnected").into(),
@@ -106,7 +106,7 @@ pub fn start(actions: async_channel::Sender<Action>) -> Tray {
     let alive = Arc::new(AtomicBool::new(false));
 
     let thread = std::thread::Builder::new()
-        .name("throne-tray".into())
+        .name("nolurix-tray".into())
         .spawn({
             let alive = alive.clone();
             move || {

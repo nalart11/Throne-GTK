@@ -1,10 +1,10 @@
 package main
 
 import (
-	"ThroneGtkCore/gen"
-	"ThroneGtkCore/internal/boxdns"
 	"context"
 	"errors"
+	"github.com/nalart11/Nolurix/core/gen"
+	"github.com/nalart11/Nolurix/core/internal/boxdns"
 )
 
 // GetDefaultInterface reports the physical default-route interface tracked by

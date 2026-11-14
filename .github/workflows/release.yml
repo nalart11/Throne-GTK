@@ -50,7 +50,7 @@ jobs:
           else
             [[ "$(uname -m)" == arm64 ]]
           fi
-          echo "THRONE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "NOLURIX_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -113,9 +113,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p release-assets
-          THRONE_PACKAGE_OUT="$PWD/release-assets" bash scripts/package-linux.sh
+          NOLURIX_PACKAGE_OUT="$PWD/release-assets" bash scripts/package-linux.sh
           # Record loader resolution and fail if this runner lacks a dependency.
-          for binary in build/throne-gtk build/throne-gtk-core build/libcronet.so; do
+          for binary in build/nolurix build/nolurix-core build/libcronet.so; do
             ldd "$binary" > "$RUNNER_TEMP/ldd.txt"
             cat "$RUNNER_TEMP/ldd.txt"
             if grep -q 'not found' "$RUNNER_TEMP/ldd.txt"; then exit 1; fi
@@ -127,8 +127,8 @@ jobs:
           ./scripts/package-macos.sh
           ./scripts/package-macos-installer.sh --dev-manual
           mkdir -p release-assets
-          cp dist/throne-gtk-macos.dmg "release-assets/throne-gtk-${THRONE_VERSION}-macos-arm64-testing.dmg"
-          cp dist/throne-gtk-local-installer.pkg "release-assets/throne-gtk-${THRONE_VERSION}-macos-arm64-testing-local.pkg"
+          cp dist/nolurix-macos.dmg "release-assets/nolurix-${NOLURIX_VERSION}-macos-arm64-testing.dmg"
+          cp dist/nolurix-local-installer.pkg "release-assets/nolurix-${NOLURIX_VERSION}-macos-arm64-testing-local.pkg"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -158,9 +158,9 @@ jobs:
           version="${TAG#v}"
           cd release-assets
           test "$(find . -type f | wc -l)" -eq 3
-          test -s "throne-gtk-${version}-linux-x86_64.tar.gz"
-          test -s "throne-gtk-${version}-macos-arm64-testing.dmg"
-          test -s "throne-gtk-${version}-macos-arm64-testing-local.pkg"
+          test -s "nolurix-${version}-linux-x86_64.tar.gz"
+          test -s "nolurix-${version}-macos-arm64-testing.dmg"
+          test -s "nolurix-${version}-macos-arm64-testing-local.pkg"
           sha256sum -- * > SHA256SUMS
           sha256sum --check SHA256SUMS
 
@@ -177,7 +177,7 @@ jobs:
           libadwaita >= 1.5 and their system runtime dependencies (Ubuntu 24.04:
           libgtk-4-1, libadwaita-1-0, libc6, libgcc-s1 and the Cronet runtime
           dependencies). Not a fully static or universal Linux build. The archive
-          has a single versioned root, lib/throne-gtk/{throne-gtk,throne-gtk-core,
+          has a single versioned root, lib/nolurix/{nolurix,nolurix-core,
           libcronet.so}, icons and a desktop template; `@EXEC@` needs an absolute
           installation path. No capabilities or system configuration are changed.
 
@@ -193,4 +193,4 @@ jobs:
           required before publishing this draft. No installer was executed in CI.
           NOTES
           gh release create "$TAG" release-assets/* --verify-tag --draft \
-            --title "Throne GTK $TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+            --title "Nolurix $TAG" --notes-file "$RUNNER_TEMP/release-notes.md"

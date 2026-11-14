@@ -2,24 +2,24 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-@MainActor private func throneIcon() -> NSImage {
-    if let url=throneResource("AppIcon",extension:"png"),let image=NSImage(contentsOf:url){return image}
-    NSLog("Throne: missing Resources/AppIcon.png; application logo unavailable")
+@MainActor private func nolurixIcon() -> NSImage {
+    if let url=nolurixResource("AppIcon",extension:"png"),let image=NSImage(contentsOf:url){return image}
+    NSLog("Nolurix: missing Resources/AppIcon.png; application logo unavailable")
     return NSImage(size:NSSize(width:32,height:32))
 }
 
-@main struct ThroneApp: App {
+@main struct NolurixApp: App {
     @StateObject private var model = Model()
     @AppStorage("appearance") private var appearance = "system"
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
     var body: some Scene {
-        Window("Throne GTK", id: "main") { MainView().environmentObject(model).frame(minWidth: 900, minHeight: 620).background(MainWindowAccessor(lifecycle: lifecycle)).task { lifecycle.model = model; model.start() }.preferredColorScheme(colorScheme) }
+        Window("Nolurix", id: "main") { MainView().environmentObject(model).frame(minWidth: 900, minHeight: 620).background(MainWindowAccessor(lifecycle: lifecycle)).task { lifecycle.model = model; model.start() }.preferredColorScheme(colorScheme) }
             .commands {
                 CommandGroup(replacing: .newItem) {}
                 CommandGroup(replacing: .appTermination) {
-                    Button(model.tr("Выйти из Throne GTK", "Quit Throne GTK")) { NSApp.terminate(nil) }.keyboardShortcut("q")
+                    Button(model.tr("Выйти из Nolurix", "Quit Nolurix")) { NSApp.terminate(nil) }.keyboardShortcut("q")
                 }
-                CommandGroup(replacing:.appInfo){Button(model.tr("О программе Throne GTK","About Throne GTK")){let a=NSAlert();a.messageText="Throne GTK";a.informativeText=model.tr("Нативный клиент прокси и VPN.","Native proxy and VPN client.");a.runModal()}}
+                CommandGroup(replacing:.appInfo){Button(model.tr("О программе Nolurix","About Nolurix")){let a=NSAlert();a.messageText="Nolurix";a.informativeText=model.tr("Независимый кроссплатформенный клиент прокси и VPN на базе sing-box и Xray.\nYour network. Your rules.","Nolurix is an independent cross-platform proxy and VPN client powered by sing-box and Xray.\nYour network. Your rules.");a.runModal()}}
             }
         Settings { SettingsView().environmentObject(model).frame(width: 650, height: 650).preferredColorScheme(colorScheme) }
     }
@@ -36,14 +36,14 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                HStack { Image(nsImage:throneIcon()).resizable().frame(width:32,height:32); VStack(alignment:.leading){Text("Throne GTK").font(.system(.headline, design:.rounded).weight(.black));Text(m.tr("ПОДКЛЮЧЕНИЕ","CONNECTION")).font(.caption2.monospaced()).foregroundStyle(.secondary)} }.padding(20).frame(maxWidth:.infinity,alignment:.leading)
+                HStack { Image(nsImage:nolurixIcon()).resizable().frame(width:32,height:32); VStack(alignment:.leading){Text("Nolurix").font(.system(.headline, design:.rounded).weight(.black));Text(m.tr("ПОДКЛЮЧЕНИЕ","CONNECTION")).font(.caption2.monospaced()).foregroundStyle(.secondary)} }.padding(20).frame(maxWidth:.infinity,alignment:.leading)
                 VStack(spacing:3) { nav("profiles", "server.rack", m.tr("Профили","Profiles")); nav("connections", "point.3.connected.trianglepath.dotted", m.tr("Соединения","Connections")); nav("logs", "text.alignleft", m.tr("Журнал","Logs")); nav("settings", "gearshape", m.tr("Настройки","Settings")) }.padding(.horizontal,10)
                 Spacer()
                 VStack(alignment:.leading,spacing:8){ Label(statusTitle, systemImage:statusIcon).font(.callout.weight(.semibold)); Text(m.tr("Локальный прокси", "Local proxy") + " · " + (m.settings["mixed_port"].map { String(describing:$0) } ?? "2080")).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth:.infinity,alignment:.leading).padding(16).background(.quaternary.opacity(0.45),in:RoundedRectangle(cornerRadius:14)).padding(12)
             }.navigationSplitViewColumnWidth(min:210, ideal:240)
         } detail: {
-            VStack(spacing:0) { header; if let notice=m.operationNotice ?? (m.snapshot["notice"] as? String),!notice.isEmpty {Label(notice,systemImage:"info.circle").font(.caption).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,28).padding(.vertical,8)}; if !m.ready {ProgressView(m.tr("Загрузка данных Throne GTK…","Loading Throne GTK data…")).frame(maxWidth:.infinity,maxHeight:.infinity)} else {Group { switch m.tab { case "connections": ConnectionsView(); case "logs": LogsView(); case "settings": SettingsView(); default: profileList } }.frame(maxWidth:.infinity,maxHeight:.infinity)} }
-        }.onChange(of:m.ready){ready in if ready { reconcileGroupSelection() };if ready,!appliedStartupVisibility {appliedStartupVisibility=true;if m.settings["start_minimized"] as? Bool == true {NSApp.windows.first(where: { $0.identifier?.rawValue == "throne-main" })?.orderOut(nil)}}}.onChange(of: groupIDs) { _ in if m.ready { reconcileGroupSelection() } }.confirmationDialog(m.tr("Удалить группу?","Delete this group?"),isPresented:$confirmDeleteGroup,titleVisibility:.visible){Button(m.tr("Удалить","Delete"),role:.destructive){m.command("group_delete",["id":groupID])};Button(m.tr("Отмена","Cancel"),role:.cancel){}}.confirmationDialog(m.tr("Удалить профиль?","Delete profile?"),isPresented:Binding(get:{pendingProfileDelete != nil},set:{if !$0 {pendingProfileDelete=nil}}),titleVisibility:.visible){Button(m.tr("Удалить","Delete"),role:.destructive){if let profile=pendingProfileDelete {m.command("profile_delete",["ids":[profile["id"] ?? 0]])};pendingProfileDelete=nil};Button(m.tr("Отмена","Cancel"),role:.cancel){}}.alert(m.tr("Ошибка","Something went wrong"), isPresented: Binding(get:{m.error != nil},set:{if !$0 {m.error=nil}})) { Button(m.tr("OK","OK"),role:.cancel){m.error=nil} } message: { Text(m.error ?? "") }.alert(m.tr("Подключить VPN?","Connect VPN?"),isPresented:$m.confirmStartupVPN){Button(m.tr("Продолжить","Continue")){m.command("connect",["acknowledge_vpn":true])};Button(m.tr("Не сейчас","Not now"),role:.cancel){}} message:{Text(m.tr("macOS может запросить разрешение на VPN и открыть системные настройки.","macOS may request VPN approval and open System Settings."))}
+            VStack(spacing:0) { header; if let notice=m.operationNotice ?? (m.snapshot["notice"] as? String),!notice.isEmpty {Label(notice,systemImage:"info.circle").font(.caption).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,28).padding(.vertical,8)}; if !m.ready {ProgressView(m.tr("Загрузка данных Nolurix…","Loading Nolurix data…")).frame(maxWidth:.infinity,maxHeight:.infinity)} else {Group { switch m.tab { case "connections": ConnectionsView(); case "logs": LogsView(); case "settings": SettingsView(); default: profileList } }.frame(maxWidth:.infinity,maxHeight:.infinity)} }
+        }.onChange(of:m.ready){ready in if ready { reconcileGroupSelection() };if ready,!appliedStartupVisibility {appliedStartupVisibility=true;if m.settings["start_minimized"] as? Bool == true {NSApp.windows.first(where: { $0.identifier?.rawValue == "nolurix-main" })?.orderOut(nil)}}}.onChange(of: groupIDs) { _ in if m.ready { reconcileGroupSelection() } }.confirmationDialog(m.tr("Удалить группу?","Delete this group?"),isPresented:$confirmDeleteGroup,titleVisibility:.visible){Button(m.tr("Удалить","Delete"),role:.destructive){m.command("group_delete",["id":groupID])};Button(m.tr("Отмена","Cancel"),role:.cancel){}}.confirmationDialog(m.tr("Удалить профиль?","Delete profile?"),isPresented:Binding(get:{pendingProfileDelete != nil},set:{if !$0 {pendingProfileDelete=nil}}),titleVisibility:.visible){Button(m.tr("Удалить","Delete"),role:.destructive){if let profile=pendingProfileDelete {m.command("profile_delete",["ids":[profile["id"] ?? 0]])};pendingProfileDelete=nil};Button(m.tr("Отмена","Cancel"),role:.cancel){}}.alert(m.tr("Ошибка","Something went wrong"), isPresented: Binding(get:{m.error != nil},set:{if !$0 {m.error=nil}})) { Button(m.tr("OK","OK"),role:.cancel){m.error=nil} } message: { Text(m.error ?? "") }.alert(m.tr("Подключить VPN?","Connect VPN?"),isPresented:$m.confirmStartupVPN){Button(m.tr("Продолжить","Continue")){m.command("connect",["acknowledge_vpn":true])};Button(m.tr("Не сейчас","Not now"),role:.cancel){}} message:{Text(m.tr("macOS может запросить разрешение на VPN и открыть системные настройки.","macOS may request VPN approval and open System Settings."))}
     }
     private var statusTitle: String { switch statusKind { case "connected": return m.tr("Подключено","Connected"); case "connecting":return m.tr("Подключение…","Connecting…"); case "failed":return m.tr("Ошибка подключения","Connection failed"); default:return m.tr("Отключено","Disconnected") } }
     private func nav(_ id:String,_ icon:String,_ label:String)->some View { Button { m.tab=id } label:{Label(label,systemImage:icon).frame(maxWidth:.infinity,alignment:.leading).padding(9).contentShape(RoundedRectangle(cornerRadius:8)).background(m.tab == id ? Color.accentColor.opacity(0.13):.clear,in:RoundedRectangle(cornerRadius:8))}.buttonStyle(.plain).accessibilityLabel(label) }

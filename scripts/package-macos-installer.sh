@@ -2,14 +2,14 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="${THRONE_PACKAGE_OUT:-$root/dist}"
-app="$out/Throne GTK.app"
-pkg="$out/throne-gtk-local-installer.pkg"
-manual_plist="$root/resources/macos/dev.nalart.ThroneGtk.manual-helper.plist"
+out="${NOLURIX_PACKAGE_OUT:-$root/dist}"
+app="$out/Nolurix.app"
+pkg="$out/nolurix-local-installer.pkg"
+manual_plist="$root/resources/macos/dev.nalart.Nolurix.manual-helper.plist"
 postinstall="$root/resources/macos/installer/postinstall"
 components="$root/resources/macos/installer/components.plist"
 export COPYFILE_DISABLE=1
-export CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-${THRONE_CODESIGN_IDENTITY:--}}"
+export CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-${NOLURIX_CODESIGN_IDENTITY:--}}"
 mode="${1:-}"
 case "$mode" in
     --dev-manual) mode=manual ;;
@@ -52,15 +52,15 @@ work="$(mktemp -d "$out/pkg.XXXXXX")"
 
 payload="$work/payload"
 pkg_scripts="$work/scripts"
-base="$payload/Library/Application Support/Throne GTK"
+base="$payload/Library/Application Support/Nolurix"
 mkdir -p "$base" "$pkg_scripts"
-ditto --noextattr --noacl "$app" "$base/Throne GTK.app"
-printf '%s\n' "$mode" > "$base/.throne-gtk-package"
+ditto --noextattr --noacl "$app" "$base/Nolurix.app"
+printf '%s\n' "$mode" > "$base/.nolurix-package"
 if [[ "$mode" = manual ]]; then
     mkdir -p "$payload/Library/LaunchDaemons"
-    install -m644 "$manual_plist" "$payload/Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist"
+    install -m644 "$manual_plist" "$payload/Library/LaunchDaemons/dev.nalart.Nolurix.helper.plist"
     install -m644 "$manual_plist" "$base/manual-helper.plist"
-    touch "$base/.throne-gtk-manual"
+    touch "$base/.nolurix-manual"
 fi
 install -m755 "$root/resources/macos/installer/preinstall" "$pkg_scripts/preinstall"
 clang -O2 -Wall -Wextra -I "$root/core/helpertrust" \
@@ -89,16 +89,16 @@ pkgbuild "$@" \
     --scripts "$pkg_scripts" \
     --component-plist "$components" \
     --ownership recommended \
-    --identifier dev.nalart.ThroneGtk.local-installer \
+    --identifier dev.nalart.Nolurix.local-installer \
     --version "$version" \
     --install-location / \
-    "$work/throne-gtk-local-installer.pkg"
+    "$work/nolurix-local-installer.pkg"
 if [[ "$mode" = release ]]; then
-    xcrun notarytool submit "$work/throne-gtk-local-installer.pkg" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$work/throne-gtk-local-installer.pkg"
+    xcrun notarytool submit "$work/nolurix-local-installer.pkg" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$work/nolurix-local-installer.pkg"
 fi
 [[ ! -e "$pkg" ]] || mv "$pkg" "$work/previous.pkg"
-mv "$work/throne-gtk-local-installer.pkg" "$pkg"
+mv "$work/nolurix-local-installer.pkg" "$pkg"
 
 echo "Готово: $pkg"
 echo "Установщик запросит пароль администратора один раз."

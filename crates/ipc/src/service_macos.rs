@@ -8,21 +8,20 @@ use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
-const HELPER_SOCKET: &str = "/Library/Application Support/Throne GTK/run/helper.sock";
-const BUNDLE: &str = "/Library/Application Support/Throne GTK/Throne GTK.app";
-const CORE: &str =
-    "/Library/Application Support/Throne GTK/Throne GTK.app/Contents/MacOS/throne-gtk-core";
+const HELPER_SOCKET: &str = "/Library/Application Support/Nolurix/run/helper.sock";
+const BUNDLE: &str = "/Library/Application Support/Nolurix/Nolurix.app";
+const CORE: &str = "/Library/Application Support/Nolurix/Nolurix.app/Contents/MacOS/nolurix-core";
 const STATUS_NOT_REGISTERED: i64 = 0;
 const STATUS_ENABLED: i64 = 1;
 const STATUS_REQUIRES_APPROVAL: i64 = 2;
 
 unsafe extern "C" {
-    fn throne_helper_status() -> i64;
-    fn throne_helper_register(error: *mut c_char, error_size: usize) -> bool;
-    fn throne_helper_unregister(error: *mut c_char, error_size: usize) -> bool;
-    fn throne_helper_open_settings();
-    fn throne_helper_safe_acl(path: *const c_char) -> bool;
-    fn throne_helper_signature(pid: libc::c_int) -> bool;
+    fn nolurix_helper_status() -> i64;
+    fn nolurix_helper_register(error: *mut c_char, error_size: usize) -> bool;
+    fn nolurix_helper_unregister(error: *mut c_char, error_size: usize) -> bool;
+    fn nolurix_helper_open_settings();
+    fn nolurix_helper_safe_acl(path: *const c_char) -> bool;
+    fn nolurix_helper_signature(pid: libc::c_int) -> bool;
 }
 
 /// Unregister Service Management in the calling user's context. Native code
@@ -32,7 +31,7 @@ pub fn unregister_helper() -> Result<()> {
         bail!("Run --unregister-helper as the logged-in user, without sudo");
     }
     let mut error = [0 as c_char; 1024];
-    if !unsafe { throne_helper_unregister(error.as_mut_ptr(), error.len()) } {
+    if !unsafe { nolurix_helper_unregister(error.as_mut_ptr(), error.len()) } {
         let message = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
         bail!("Service Management unregister: {message}");
     }
@@ -92,6 +91,7 @@ async fn start_inner(endpoint: &Path, debug: bool) -> Result<u32> {
     }
 
     let mut request = Vec::with_capacity(15 + path.len());
+    // Versioned wire magic is intentionally stable across the product rename.
     request.extend_from_slice(b"THRONE1\0");
     request.extend_from_slice(&std::process::id().to_le_bytes());
     request.push(u8::from(debug));
@@ -135,10 +135,7 @@ async fn start_inner(endpoint: &Path, debug: bool) -> Result<u32> {
 }
 
 fn manual_installation() -> Result<bool> {
-    let marker = Path::new(BUNDLE)
-        .parent()
-        .unwrap()
-        .join(".throne-gtk-manual");
+    let marker = Path::new(BUNDLE).parent().unwrap().join(".nolurix-manual");
     match std::fs::symlink_metadata(&marker) {
         Ok(metadata) => {
             protected_node(&marker, false)?;
@@ -154,7 +151,7 @@ fn manual_installation() -> Result<bool> {
 
 fn reject_acl(path: &Path) -> Result<()> {
     let name = CString::new(path.as_os_str().as_bytes())?;
-    if !unsafe { throne_helper_safe_acl(name.as_ptr()) } {
+    if !unsafe { nolurix_helper_safe_acl(name.as_ptr()) } {
         bail!("unsafe or unreadable ACL on {}", path.display());
     }
     Ok(())
@@ -186,7 +183,7 @@ fn protected_ancestors(path: &Path) -> Result<()> {
 
 fn validate_installation() -> Result<()> {
     protected_ancestors(Path::new(BUNDLE))
-        .context("Install or repair the protected Throne GTK bundle using the PKG")?;
+        .context("Install or repair the protected Nolurix bundle using the PKG")?;
     let mut pending = vec![PathBuf::from(BUNDLE)];
     while let Some(path) = pending.pop() {
         if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
@@ -276,26 +273,26 @@ fn authenticate_helper(stream: &UnixStream) -> Result<()> {
         bail!("unexpected root-helper executable");
     }
     validate_installation()?;
-    if !unsafe { throne_helper_signature(pid as libc::c_int) } {
+    if !unsafe { nolurix_helper_signature(pid as libc::c_int) } {
         bail!("root-helper live signature validation failed");
     }
     Ok(())
 }
 
 fn ensure_registered() -> Result<()> {
-    let mut status = unsafe { throne_helper_status() };
+    let mut status = unsafe { nolurix_helper_status() };
     if status == STATUS_NOT_REGISTERED {
         let mut error = vec![0_i8; 1024];
-        if !unsafe { throne_helper_register(error.as_mut_ptr(), error.len()) } {
+        if !unsafe { nolurix_helper_register(error.as_mut_ptr(), error.len()) } {
             let message = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
             bail!("не удалось зарегистрировать root-helper: {message}");
         }
-        status = unsafe { throne_helper_status() };
+        status = unsafe { nolurix_helper_status() };
     }
     if status == STATUS_REQUIRES_APPROVAL {
-        unsafe { throne_helper_open_settings() };
+        unsafe { nolurix_helper_open_settings() };
         bail!(
-            "разрешите Throne GTK в «Системные настройки → Основные → Объекты входа и расширения», затем повторите подключение"
+            "разрешите Nolurix в «Системные настройки → Основные → Объекты входа и расширения», затем повторите подключение"
         );
     }
     if status != STATUS_ENABLED {

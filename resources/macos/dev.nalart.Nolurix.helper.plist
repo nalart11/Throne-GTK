@@ -3,10 +3,16 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>dev.nalart.ThroneGtk.helper</string>
+    <string>dev.nalart.Nolurix.helper</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>dev.nalart.Nolurix</string>
+    </array>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/nolurix-core</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Library/Application Support/Throne GTK/Throne GTK.app/Contents/MacOS/throne-gtk-core</string>
+        <string>nolurix-core</string>
         <string>--helper</string>
     </array>
     <key>RunAtLoad</key>

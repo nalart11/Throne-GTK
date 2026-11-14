@@ -75,7 +75,7 @@ func TestContainedFrameworkLinks(t *testing.T) {
 func TestContainedFrameworkLinksThroughSymlinkedAncestor(t *testing.T) {
 	root := t.TempDir()
 	realParent := filepath.Join(root, "private", "var")
-	realBundle := filepath.Join(realParent, "Throne GTK.app")
+	realBundle := filepath.Join(realParent, "Nolurix.app")
 	frameworks := filepath.Join(realBundle, "Contents", "Frameworks")
 	if err := os.MkdirAll(frameworks, 0755); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestContainedFrameworkLinksThroughSymlinkedAncestor(t *testing.T) {
 	if err := os.Symlink(realParent, aliasParent); err != nil {
 		t.Fatal(err)
 	}
-	bundle := filepath.Join(aliasParent, "Throne GTK.app")
+	bundle := filepath.Join(aliasParent, "Nolurix.app")
 	for _, path := range []string{filepath.Join(frameworks, "real"), filepath.Join(root, "outside")} {
 		if err := os.WriteFile(path, []byte("code"), 0644); err != nil {
 			t.Fatal(err)
@@ -141,7 +141,7 @@ func TestNativePolicySourceContract(t *testing.T) {
 	}
 	for _, guard := range []string{
 		"throne_release_info(info)", "throne_release_info(liveInfo)",
-		"if (!throne_local_development_install()) s = -1;", ".throne-gtk-manual",
+		"if (!throne_local_development_install()) s = -1;", ".nolurix-manual",
 		"SecCodeCopySigningInformation(live,", "com.apple.security.get-task-allow",
 		"com.apple.security.cs.disable-library-validation",
 		"com.apple.security.cs.allow-dyld-environment-variables",
@@ -224,11 +224,11 @@ int main(void) {
 
 func TestLayoutAlwaysEnforced(t *testing.T) {
 	// Debug is deliberately not a policy input, nor is it a build-tag bypass.
-	t.Setenv("THRONE_CORE_DEBUG", "1")
+	t.Setenv("NOLURIX_CORE_DEBUG", "1")
 	if err := CheckLayout(Core, GUI); err != nil {
 		t.Fatal(err)
 	}
-	for _, pair := range [][2]string{{"/tmp/throne-gtk-core", GUI}, {Core, "/tmp/throne-gtk"}, {Core, Bundle + "/Contents/MacOS/../MacOS/throne-gtk"}} {
+	for _, pair := range [][2]string{{"/tmp/nolurix-core", GUI}, {Core, "/tmp/nolurix"}, {Core, Bundle + "/Contents/MacOS/../MacOS/nolurix"}} {
 		if CheckLayout(pair[0], pair[1]) == nil {
 			t.Fatal("accepted wrong layout in debug mode")
 		}

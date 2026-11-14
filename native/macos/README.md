@@ -17,7 +17,7 @@ bash native/macos/build.sh
 
 Outputs, Cargo target files and logs stay in `native/macos/.build/`. The bridge
 is a macOS-only root-workspace member and uses the shared lockfile. These direct
-commands do not overwrite `build/throne-gtk`; `just build-app` publishes the
+commands do not overwrite `build/nolurix`; `just build-app` publishes the
 native binary and resources there. Building does not launch a GUI.
 
 `verify-bridge.sh` compiles and runs a standalone Swift 6 Foundation program
@@ -27,29 +27,35 @@ observable Model, including retry after a controlled close failure.
 `package.sh --dmg` assembles/signs an isolated bundle and DMG under `.build/package`
 using an already-built adjacent core; it does not install or register anything.
 
-The executable is `.build/throne-gtk`; a real core must be placed immediately
-beside it as `throne-gtk-core`. Renaming the GUI or using a core in an unrelated
+The executable is `.build/nolurix`; a real core must be placed immediately
+beside it as `nolurix-core`. Renaming the GUI or using a core in an unrelated
 directory does not satisfy the core's parent-process authentication. Do not
 weaken that check. Only the existing helper may launch a privileged VPN core.
 
 VPN additionally requires the GUI to be beside the core of the **running helper**.
 For example, a GUI launched from `.build/` cannot use a helper running from
-`/Applications/Throne GTK.app/Contents/MacOS/throne-gtk-core`, even if `.build/`
+`/Library/Application Support/Nolurix/Nolurix.app/Contents/MacOS/nolurix-core`, even if `.build/`
 also contains a core. Package the current build, install it at the intended app
 location, and launch that installed app rather than the loose development binary.
 Installing or refreshing a privileged helper is a separate, explicitly authorized
 operation; packaging alone neither installs the app nor refreshes the helper.
 
-The isolated `.app`/DMG checks passed with the existing core, but that core was
-built with minimum macOS **27.0**. Packaging derives the real minimum from both
-binaries, so this particular bundle requires 27.0 despite the frontend's 13.0
-target. No older-system runtime test has been performed.
+Historical pre-rebrand checks recorded an isolated Throne GTK `.app`/DMG whose
+core minimum was macOS **27.0**. This is not evidence for Nolurix. Packaging
+derives the real minimum from both binaries; no current native runtime result
+or older-system compatibility is established by those historical checks.
 
 ## Existing data and language
 
 Normal use opens the same database:
-`~/Library/Application Support/throne-gtk/throne-gtk.db`. Do not launch the GTK
+`~/Library/Application Support/nolurix/nolurix.db`. Do not launch the GTK
 and native frontend against the same installation at the same time.
+
+Former `throne-gtk/throne-gtk.db` data migrates automatically before opening
+the store, using WAL-safe SQLite backup. Existing Nolurix data wins, without
+merging, overwriting, or deleting the source. Interrupted publication can retry.
+This differs from explicit original Throne import. See [migration and old-helper
+retirement](../../docs/MIGRATION.md).
 
 Rust owns all persistent state. Language is the existing Settings field
 `language` (`ru`/`en`), default Russian for old databases; there is no parallel

@@ -1,17 +1,19 @@
 //! Storage: groups, profiles, and settings in SQLite.
 //!
-//! A separate database (`~/.config/throne-gtk/`), rather than one shared with the
+//! A separate database (`~/.config/nolurix/`), rather than one shared with the
 //! original Throne: two programs writing to one file will eventually overwrite
 //! each other's changes. Data from Throne is moved by a one-time import — see [`Store::import_throne`].
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use nolurix_config::profile::{Group, Profile};
+use nolurix_config::route::{Condition, MatchKind, RouteAction, RouteRule};
+use nolurix_config::Settings;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
-use throne_config::profile::{Group, Profile};
-use throne_config::route::{Condition, MatchKind, RouteAction, RouteRule};
-use throne_config::Settings;
+
+pub mod migration;
 
 pub struct Store {
     conn: Connection,
@@ -417,7 +419,7 @@ impl Store {
             // Throne stores the subscription header as is; there is no reason to
             // show `upload=0; download=0; expire=...` to the user.
             let info = match info.contains('=') {
-                true => throne_config::subscription::format_userinfo(&info),
+                true => nolurix_config::subscription::format_userinfo(&info),
                 false => info,
             };
             let new_gid = if old_id == 1 {
@@ -775,8 +777,8 @@ fn row_to_profile(r: &Row<'_>) -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use throne_config::link;
-    use throne_config::route::MatchMode;
+    use nolurix_config::link;
+    use nolurix_config::route::MatchMode;
 
     fn profile(link_str: &str) -> Profile {
         link::parse(link_str).unwrap()
@@ -891,8 +893,8 @@ mod tests {
 
         let mut s = Settings::default();
         s.mixed_port = 1080;
-        s.mode = throne_config::settings::ProxyMode::Vpn;
-        s.language = throne_config::settings::Language::En;
+        s.mode = nolurix_config::settings::ProxyMode::Vpn;
+        s.language = nolurix_config::settings::Language::En;
         s.dns_remote = "https://dns.google/dns-query".into();
         store.save_settings(&s).unwrap();
 

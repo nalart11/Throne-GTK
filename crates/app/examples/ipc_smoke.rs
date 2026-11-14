@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{ensure, Context, Result};
-use throne_ipc::Core;
+use nolurix_ipc::Core;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -15,7 +15,7 @@ use tokio::{
 };
 
 const LIMIT: Duration = Duration::from_secs(60);
-const MARKER: &str = "throne-ipc-loopback-ok";
+const MARKER: &str = "nolurix-ipc-loopback-ok";
 
 struct RuntimeDir(PathBuf);
 
@@ -25,7 +25,7 @@ impl RuntimeDir {
         for attempt in 0..32 {
             let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "throne-ipc-smoke-{}-{stamp}-{attempt}",
+                "nolurix-ipc-smoke-{}-{stamp}-{attempt}",
                 std::process::id()
             ));
             let mut builder = std::fs::DirBuilder::new();
@@ -99,15 +99,13 @@ async fn proxy_roundtrip(port: u16) -> Result<()> {
 async fn smoke(runtime: &RuntimeDir) -> Result<()> {
     let executable = std::env::current_exe()?;
     ensure!(
-        executable
-            .file_stem()
-            .is_some_and(|name| name == "throne-gtk"),
+        executable.file_stem().is_some_and(|name| name == "nolurix"),
         "run via just ipc-smoke (exact parent name required)"
     );
     let binary = executable
         .parent()
         .context("missing executable parent")?
-        .join(format!("throne-gtk-core{}", std::env::consts::EXE_SUFFIX));
+        .join(format!("nolurix-core{}", std::env::consts::EXE_SUFFIX));
     ensure!(
         binary.is_file(),
         "missing adjacent core: {}",
@@ -140,7 +138,7 @@ async fn smoke(runtime: &RuntimeDir) -> Result<()> {
         });
         match first
             .client
-            .start(throne_ipc::load_request(config.to_string()))
+            .start(nolurix_ipc::load_request(config.to_string()))
             .await
         {
             Ok(()) => {

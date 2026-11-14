@@ -15,7 +15,7 @@ actor Backend {
     init(beforeClose: (@Sendable () throws -> Void)? = nil) { self.beforeClose = beforeClose }
     private func decode(_ pointer: UnsafeMutablePointer<CChar>?) throws -> String {
         guard let pointer else { throw BridgeFailure.response("Null bridge response") }
-        defer { throne_macos_string_free(pointer) }
+        defer { nolurix_macos_string_free(pointer) }
         let data = Data(String(cString: pointer).utf8)
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw BridgeFailure.response("Invalid bridge response")
@@ -25,23 +25,23 @@ actor Backend {
     }
     func open(optionsJSON: String = "{}") throws {
         guard handle == nil else { return }
-        let raw = try optionsJSON.withCString { try decode(throne_macos_open($0)) }
+        let raw = try optionsJSON.withCString { try decode(nolurix_macos_open($0)) }
         guard let number = try JSONSerialization.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed]) as? NSNumber,
               number.uint64Value > 0 else { throw BridgeFailure.response("Bridge did not return a numeric handle") }
         handle = number.uint64Value
     }
     func send(_ json: String) throws -> String {
         guard let handle else { throw BridgeFailure.closed }
-        return try json.withCString { try decode(throne_macos_request(handle, $0)) }
+        return try json.withCString { try decode(nolurix_macos_request(handle, $0)) }
     }
     func poll() throws -> String {
         guard let handle else { throw BridgeFailure.closed }
-        return try decode(throne_macos_poll(handle, 100))
+        return try decode(nolurix_macos_poll(handle, 100))
     }
     func close() throws {
         guard let current = handle else { return }
         try beforeClose?()
-        _ = try decode(throne_macos_close(current))
+        _ = try decode(nolurix_macos_close(current))
         handle = nil // Failed close retains the exact handle for retry.
     }
 }
@@ -83,7 +83,7 @@ actor Backend {
                 let args = CommandLine.arguments
                 if let flag = args.firstIndex(of: "--data-dir"), args.indices.contains(flag + 1) { options["data_dir"] = args[flag + 1] }
                 if args.contains("--smoke"), options["data_dir"] == nil {
-                    options["data_dir"] = FileManager.default.temporaryDirectory.appendingPathComponent("throne-macos-smoke-\(UUID().uuidString)").path
+                    options["data_dir"] = FileManager.default.temporaryDirectory.appendingPathComponent("nolurix-macos-smoke-\(UUID().uuidString)").path
                 }
                 let text = try optionsJSON ?? Self.encode(options)
                 try await backend.open(optionsJSON: text)

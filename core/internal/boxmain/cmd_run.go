@@ -1,10 +1,10 @@
 package boxmain
 
 import (
-	"ThroneGtkCore/internal/boxbox"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nalart11/Nolurix/core/internal/boxbox"
 	"os"
 	"os/signal"
 	runtimeDebug "runtime/debug"

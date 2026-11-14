@@ -1,4 +1,4 @@
-module ThroneGtkCore
+module github.com/nalart11/Nolurix/core
 
 go 1.26
 

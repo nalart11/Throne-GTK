@@ -3,8 +3,10 @@
 package ipc
 
 import (
+	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/tailscale/go-winio"
@@ -12,6 +14,11 @@ import (
 )
 
 func ConnectIPC(socketName string, expectedPid int) (net.Conn, error) {
+	// Only local Nolurix endpoints are valid. Peer PID authentication below
+	// remains mandatory; the name alone never establishes trust.
+	if !strings.HasPrefix(socketName, `\\.\pipe\nolurix-`) || expectedPid <= 0 {
+		return nil, fmt.Errorf("ipc: invalid local Nolurix pipe or expected peer PID")
+	}
 	timeout := 5 * time.Second
 	conn, err := winio.DialPipe(socketName, &timeout)
 	if err != nil {

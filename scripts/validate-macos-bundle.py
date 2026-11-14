@@ -14,8 +14,8 @@ def contained(path):
     return resolved
 
 with (app / 'Contents/Info.plist').open('rb') as source:
-    assert plistlib.load(source)['CFBundleIdentifier'] == 'dev.nalart.ThroneGtk'
-for name in ('throne-gtk', 'throne-gtk-core'):
+    assert plistlib.load(source)['CFBundleIdentifier'] == 'dev.nalart.Nolurix'
+for name in ('nolurix', 'nolurix-core'):
     binary = app / 'Contents/MacOS' / name
     assert binary.is_file() and not binary.is_symlink(), binary
 def local_path(value, binary):
@@ -67,7 +67,7 @@ for path in app.rglob('*'):
 for path, (deps, rpaths) in images.items():
     # A dylib can inherit the executable's runpath stack. Check both shipped
     # entrypoints independently; reject ambiguous resolution rather than guess.
-    for executable in ('throne-gtk', 'throne-gtk-core'):
+    for executable in ('nolurix', 'nolurix-core'):
         inherited = images.get((app/'Contents/MacOS'/executable).resolve(), ([], []))[1]
         for dep in deps:
             if dep.startswith(('/usr/lib/', '/System/Library/')):

@@ -10,7 +10,7 @@ fn main() {
         cc::Build::new()
             .file("src/service_macos.m")
             .flag("-fobjc-arc")
-            .compile("throne_service_macos");
+            .compile("nolurix_service_macos");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=ServiceManagement");
         println!("cargo:rustc-link-lib=framework=Security");

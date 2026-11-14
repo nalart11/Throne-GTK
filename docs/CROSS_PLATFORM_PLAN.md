@@ -94,7 +94,7 @@ Acceptance review and remaining blockers:
    diagnostics; sentinel tests cover malformed VLESS flow/encryption and gate
    errors. This is not a comprehensive audit of upstream internal logging.
 4. Helper trust and PKG layout now use the protected complete bundle under
-   `/Library/Application Support/Throne GTK`, with only a convenience link under
+   `/Library/Application Support/Nolurix`, with only a convenience link under
    `/Applications`. Contained Frameworks links and harmless ACLs are permitted;
    mutation grants are rejected. SMAppService is preserved; manual development
    registration is explicit, never an authentication-failure fallback. Actual

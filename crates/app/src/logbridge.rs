@@ -1,6 +1,6 @@
 //! A bridge from `tracing` to the window log.
 //!
-//! The core writes its messages through `tracing` (placed there by `throne-ipc`),
+//! The core writes its messages through `tracing` (placed there by `nolurix-ipc`),
 //! and the same messages must be visible in the interface — otherwise diagnosing
 //! a connection failure requires using the terminal.
 

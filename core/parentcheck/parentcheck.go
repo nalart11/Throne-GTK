@@ -17,7 +17,7 @@ func CheckParentProcess() {
 	}
 }
 
-// CheckGUIProcess verifies that pid is the throne-gtk executable shipped next
+// CheckGUIProcess verifies that pid is the nolurix executable shipped next
 // to this core. The macOS privileged helper uses this for the process at the
 // other end of its control socket; the ordinary core uses it for its parent.
 func CheckGUIProcess(pid int) error {
@@ -38,13 +38,13 @@ func CheckGUIProcess(pid int) error {
 	parentBase := filepath.Base(parentPath)
 
 	if runtime.GOOS == "windows" {
-		if !strings.EqualFold(parentDir, selfDir) || !strings.EqualFold(parentBase, "throne-gtk.exe") {
+		if !strings.EqualFold(parentDir, selfDir) || !strings.EqualFold(parentBase, "nolurix.exe") {
 			return fmt.Errorf("parent check failed: unexpected GUI %q, selfPath is %q", parentPath, selfPath)
 		}
 		return nil
 	}
 
-	if parentDir != selfDir || parentBase != "throne-gtk" {
+	if parentDir != selfDir || parentBase != "nolurix" {
 		return fmt.Errorf("parent check failed: unexpected GUI %q, selfPath is %q", parentPath, selfPath)
 	}
 	return nil

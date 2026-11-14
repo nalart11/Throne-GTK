@@ -4,17 +4,17 @@ Rust owns the Store and connection state. Swift renders snapshots, never guesses
 that an accepted connection command has completed. All C calls run off MainActor.
 
 The UTF-8 C ABI returns owned NUL-terminated JSON strings. Each non-null result
-must be released exactly once by `throne_macos_string_free`. Input strings are
+must be released exactly once by `nolurix_macos_string_free`. Input strings are
 borrowed only for the call. No callbacks cross the ABI. Handles are numeric,
 validated by Rust; closed handles return errors rather than dereferencing freed
 memory. Panics must not unwind across C. Call close once after stopping polling.
 
 ```
-char *throne_macos_open(const char *options_json);
-char *throne_macos_request(uint64_t handle, const char *request_json);
-char *throne_macos_poll(uint64_t handle, uint32_t timeout_ms);
-char *throne_macos_close(uint64_t handle);
-void throne_macos_string_free(char *value);
+char *nolurix_macos_open(const char *options_json);
+char *nolurix_macos_request(uint64_t handle, const char *request_json);
+char *nolurix_macos_poll(uint64_t handle, uint32_t timeout_ms);
+char *nolurix_macos_close(uint64_t handle);
+void nolurix_macos_string_free(char *value);
 ```
 
 Every response is `{ "ok": true, "value": ... }` or
@@ -24,7 +24,7 @@ additional event-specific fields may be present. Backend errors are surfaced,
 not swallowed. Commands return accepted/results; engine events update snapshots.
 
 Open options: `data_dir` (explicit directory; omitted means existing macOS
-Application Support/throne-gtk), `core_path` (optional, default adjacent core).
+Application Support/nolurix), `core_path` (optional, default adjacent core).
 Database filename/path must match current app paths. Tests always provide a
 temporary `data_dir`. Open does not connect or change system configuration.
 
@@ -74,4 +74,4 @@ engine's detached-worker cancellation is fixed after shared-file handoff. This
 is not full GTK parity and must remain visible in acceptance notes.
 
 Build harness remains isolated: no root workspace/lockfile edits, a separate
-Cargo target directory and native output, executable basename `throne-gtk`.
+Cargo target directory and native output, executable basename `nolurix`.

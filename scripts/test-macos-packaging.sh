@@ -19,19 +19,86 @@ def bind_fixture_socket(control, path):
             os.close(previous)
 
 r = pathlib.Path(sys.argv[1])
-fixed = '/Library/Application Support/Throne GTK/Throne GTK.app'
-with (r/'resources/macos/dev.nalart.ThroneGtk.manual-helper.plist').open('rb') as f:
-    assert plistlib.load(f)['ProgramArguments'][0] == fixed+'/Contents/MacOS/throne-gtk-core'
-with (r/'resources/macos/dev.nalart.ThroneGtk.helper.plist').open('rb') as f:
+fixed = '/Library/Application Support/Nolurix/Nolurix.app'
+# Linux cannot compile ServiceManagement, but it can catch shared-header symbol
+# drift in the Objective-C adapter before a Darwin compiler is available.
+adapter = (r/'crates/ipc/src/service_macos.m').read_text()
+security_header = (r/'core/helpertrust/security.h').read_text()
+header_functions = set(re.findall(r'static int (\w+)\(', security_header))
+adapter_calls = set(re.findall(r'\breturn\s+(\w+)\(', adapter))
+assert len(adapter_calls) == 2 and adapter_calls <= header_functions, adapter_calls
+assert fixed+'/Contents/MacOS/nolurix-core' in adapter
+with (r/'resources/macos/dev.nalart.Nolurix.manual-helper.plist').open('rb') as f:
+    manual = plistlib.load(f)
+    assert manual['ProgramArguments'][0] == fixed+'/Contents/MacOS/nolurix-core'
+    assert manual['Label'] == 'dev.nalart.Nolurix.helper'
+with (r/'resources/macos/dev.nalart.Nolurix.helper.plist').open('rb') as f:
     p = plistlib.load(f)
-    assert p['BundleProgram'] == 'Contents/MacOS/throne-gtk-core'
+    assert p['BundleProgram'] == 'Contents/MacOS/nolurix-core'
+    assert p['Label'] == 'dev.nalart.Nolurix.helper'
 with (r/'resources/macos/installer/components.plist').open('rb') as f:
     assert plistlib.load(f)[0]['RootRelativeBundlePath'] == fixed.lstrip('/')
 pre = (r/'resources/macos/installer/preinstall').read_text()
+# Execute the actual production legacy preflight with redirected fixture paths.
+# Any attempt to reach the ACL reader/mutation stage is a test failure.
+legacy_preflight = pre[:pre.index("base='/Library/Application Support/Nolurix'")]
+for operation in ('"$acl_check" --ancestors', '/bin/launchctl bootout',
+                  '"$app/Contents/MacOS/nolurix-core" --recover-dns',
+                  '/bin/mkdir', '/bin/chmod', '/usr/sbin/chown'):
+    assert pre.index(operation) > len(legacy_preflight)
+assert all(command not in legacy_preflight for command in
+           ('/bin/rm', '/bin/mkdir', '/bin/chmod', '/usr/sbin/chown', '--recover-dns'))
+legacy_paths = [
+    '/Library/Application Support/Throne GTK', '/Applications/Throne GTK.app',
+    '/Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist',
+    '/Library/LaunchDaemons/dev.nalart.ThroneGtk.manual-helper.plist',
+]
+legacy_labels = ['dev.nalart.ThroneGtk.helper', 'dev.nalart.ThroneGtk.manual-helper']
+with tempfile.TemporaryDirectory() as tmp:
+    fixture = pathlib.Path(tmp)
+    launchctl = fixture/'launchctl'
+    launchctl.write_text('#!/bin/bash\n[ "$1" = print ] && [ "$2" = "${LOADED:-never}" ]\n')
+    launchctl.chmod(0o755)
+    source = legacy_preflight.replace('/bin/launchctl', str(launchctl))
+    for index, path in enumerate(legacy_paths):
+        source = source.replace(path, str(fixture/f'legacy-{index}'))
+    script = fixture/'preflight'
+    script.write_text(source + '\necho REACHED_SAFE_STAGE\n')
+    def run_legacy(loaded=''):
+        return subprocess.run(['bash', str(script)], text=True, capture_output=True,
+                              env={**os.environ, 'LOADED': loaded})
+    assert run_legacy().returncode == 0
+    for index in range(len(legacy_paths)):
+        node = fixture/f'legacy-{index}'
+        for kind in ('directory', 'file', 'dangling-link'):
+            if kind == 'directory':
+                node.mkdir()
+            elif kind == 'file':
+                node.touch()
+            else:
+                node.symlink_to(fixture/'missing-target')
+            result = run_legacy()
+            assert result.returncode != 0 and 'REACHED_SAFE_STAGE' not in result.stdout
+            assert '--unregister-helper' in result.stderr and 'original protected uninstaller' in result.stderr
+            assert node.exists() or node.is_symlink()  # no automatic cleanup
+            node.rmdir() if kind == 'directory' else node.unlink()
+    for label in legacy_labels:
+        result = run_legacy('system/'+label)
+        assert result.returncode != 0 and 'REACHED_SAFE_STAGE' not in result.stdout
+        assert '--unregister-helper' in result.stderr
+# The brand migration must not abandon, move, or split the old recovery lock.
+dns = (r/'core/internal/sys/set_dns_darwin.go').read_text()
+assert dns.count('openDNSJournal("/private/var/db/throne-gtk-dns", 0)') == 2
+assert '/private/var/db/nolurix-dns' not in dns
+journal = (r/'core/internal/sys/dns_journal_unix.go').read_text()
+assert 'unix.O_NOFOLLOW' in journal and 'unix.Flock(lock, unix.LOCK_EX|unix.LOCK_NB)' in journal
+assert 'checkDNSFile(fd, j.owner, false)' in journal
+assert 'nolurix_dns_safe_acl' in dns
+print('Legacy refusal: 12 path fixtures and 2 loaded labels passed; shared DNS journal preserved')
 post = (r/'resources/macos/installer/postinstall').read_text()
 go = (r/'core/helper_darwin.go').read_text()
 rust = (r/'crates/ipc/src/service_macos.rs').read_text()
-runtime = '/Library/Application Support/Throne GTK/run/'
+runtime = '/Library/Application Support/Nolurix/run/'
 assert re.search(r'const helperSocket = "([^"]+)"', go)[1] == runtime+'helper.sock'
 assert re.search(r'const HELPER_SOCKET: &str = "([^"]+)"', rust)[1] == runtime+'helper.sock'
 assert 'const path = "'+runtime+'helper.lock"' in go
@@ -44,7 +111,7 @@ pkg = (r/'scripts/package-macos-installer.sh').read_text()
 assert 'Foreign install directory' in pre and 'Legacy or foreign /Applications' in pre
 assert 'bootout is NOT unregister' in pre
 assert '[ ! -e "$link" ] && [ ! -L "$link" ]' in post
-assert 'ditto --noextattr --noacl "$app" "$base/Throne GTK.app"' in pkg
+assert 'ditto --noextattr --noacl "$app" "$base/Nolurix.app"' in pkg
 assert '--dev-manual' in pkg and '--release' in pkg
 # Execute the production optional-argument block, not a reimplementation. This
 # runs under system Bash 3.2 on macOS CI as well as the host Bash on Linux.
@@ -64,8 +131,8 @@ pkgbuild() { printf '%s\\0' "$@"; }
 ''' + argument_block)
     common = ['--root', 'fixture payload', '--scripts', 'fixture scripts',
               '--component-plist', 'fixture components', '--ownership', 'recommended',
-              '--identifier', 'dev.nalart.ThroneGtk.local-installer', '--version', '0.2.0',
-              '--install-location', '/', 'fixture work/throne-gtk-local-installer.pkg']
+              '--identifier', 'dev.nalart.Nolurix.local-installer', '--version', '0.2.0',
+              '--install-location', '/', 'fixture work/nolurix-local-installer.pkg']
     for mode, signing in [('manual', []), ('release', ['--sign', 'Developer ID Installer: Fixture (TEST ID)', '--timestamp'])]:
         result = subprocess.run(['bash', str(script), mode], check=True, capture_output=True)
         argv = result.stdout.decode().split('\0')
@@ -78,7 +145,7 @@ credentials = {'CODESIGN_IDENTITY': 'Developer ID Application: Fixture',
                'NOTARY_PROFILE': 'fixture-profile'}
 for missing in credentials:
     env = dict(os.environ)
-    for key in (*credentials, 'THRONE_CODESIGN_IDENTITY'):
+    for key in (*credentials, 'NOLURIX_CODESIGN_IDENTITY'):
         env.pop(key, None)
     env.update({key: value for key, value in credentials.items() if key != missing})
     result = subprocess.run(['bash', str(r/'scripts/package-macos-installer.sh'), '--release'],
@@ -91,9 +158,9 @@ assert pre.index('Modified launchd plist') < pre.index('/bin/launchctl bootout')
 assert '/bin/launchctl bootout' not in post
 uninstall = (r/'scripts/uninstall-macos.sh').read_text()
 assert uninstall.index('/bin/launchctl bootout') < uninstall.index('/bin/rm "$plist"')
-assert uninstall.index('"$acl_check" --tree') < uninstall.index('"$app/Contents/MacOS/throne-gtk-core" --recover-dns') < uninstall.index('/bin/rm "$plist"')
+assert uninstall.index('"$acl_check" --tree') < uninstall.index('"$app/Contents/MacOS/nolurix-core" --recover-dns') < uninstall.index('/bin/rm "$plist"')
 assert uninstall.index('--recover-dns') < uninstall.index('/bin/rm -f "$base/run/helper.sock" "$base/run/helper.lock"')
-assert pre.index('/bin/launchctl bootout') < pre.index('"$app/Contents/MacOS/throne-gtk-core" --recover-dns')
+assert pre.index('/bin/launchctl bootout') < pre.index('"$app/Contents/MacOS/nolurix-core" --recover-dns')
 for source in (pre, uninstall):
     assert 'bootout "system/$label" || fail' in source
     assert 'bootout "system/$label" 2>/dev/null || true' not in source
@@ -102,7 +169,7 @@ assert pre.index('"$acl_check" --tree "$base"') < pre.index('/bin/launchctl boot
 assert '--ancestors / /Library' in pre and '/Applications || fail' not in pre
 assert '"$acl_check" --nodes "$plist"' in pre
 assert '/bin/chmod -N "$base"' in pre
-for resource in ('dev.nalart.ThroneGtk.helper.plist', 'dev.nalart.ThroneGtk.manual-helper.plist'):
+for resource in ('dev.nalart.Nolurix.helper.plist', 'dev.nalart.Nolurix.manual-helper.plist'):
     with (r/'resources/macos'/resource).open('rb') as f:
         assert not plistlib.load(f).get('AbandonProcessGroup', False)
 with tempfile.TemporaryDirectory() as tmp:
@@ -110,8 +177,8 @@ with tempfile.TemporaryDirectory() as tmp:
     (app/'Contents/MacOS').mkdir(parents=True)
     (app/'Contents/Frameworks').mkdir()
     with (app/'Contents/Info.plist').open('wb') as f:
-        plistlib.dump({'CFBundleIdentifier':'dev.nalart.ThroneGtk'}, f)
-    for name in ('throne-gtk', 'throne-gtk-core'):
+        plistlib.dump({'CFBundleIdentifier':'dev.nalart.Nolurix'}, f)
+    for name in ('nolurix', 'nolurix-core'):
         (app/'Contents/MacOS'/name).write_text('fixture')
     validator = [sys.executable, str(r/'scripts/validate-macos-bundle.py'), str(app)]
     subprocess.run(validator, check=True)
@@ -150,8 +217,8 @@ with tempfile.TemporaryDirectory() as tmp:
     source = pre.replace('/Library', tmp+'/Library').replace('/Applications', tmp+'/Applications')
     mocks = {
         '/usr/bin/stat': 'case "$2" in *Lp*) echo "0 755";; *) echo 0;; esac', '/usr/bin/find': 'exit 0',
-        '/usr/bin/codesign': 'exit 0', '/usr/libexec/PlistBuddy': 'echo dev.nalart.ThroneGtk',
-        '/bin/launchctl': 'case "$1" in\nprint) test -f "$STATE";;\nbootout) echo stop >> "$EVENTS"; [ "${STOP_FAIL:-0}" = 0 ] || exit 1; rm "$STATE";;\nesac',
+        '/usr/bin/codesign': 'exit 0', '/usr/libexec/PlistBuddy': 'echo dev.nalart.Nolurix',
+        '/bin/launchctl': '[ "$2" = system/dev.nalart.Nolurix.helper ] || exit 1\ncase "$1" in\nprint) test -f "$STATE";;\nbootout) echo stop >> "$EVENTS"; [ "${STOP_FAIL:-0}" = 0 ] || exit 1; rm "$STATE";;\nesac',
         '/bin/chmod': 'echo "chmod $*" >> "$ACL_EVENTS"',
         '/usr/sbin/chown': 'echo "chown $*" >> "$ACL_EVENTS"',
         '/bin/ls': 'echo metadata; [ -z "${ACL_TEXT:-}" ] || printf "%s\\n" "$ACL_TEXT"; exit 0',
@@ -170,7 +237,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (fixture/'mode').write_text('manual\n')
     for name in ('Library/Application Support', 'Library/LaunchDaemons', 'Applications'):
         (fixture/name).mkdir(parents=True, exist_ok=True)
-    base = fixture/'Library/Application Support/Throne GTK'
+    base = fixture/'Library/Application Support/Nolurix'
     base.mkdir()
     state, events = fixture/'state', fixture/'events'
     state.touch()
@@ -181,17 +248,17 @@ with tempfile.TemporaryDirectory() as tmp:
         assert (result.returncode == 0) == valid
     preflight(False) # foreign directory: no ownership marker
     assert not events.exists()
-    (base/'.throne-gtk-package').write_text('manual\n')
-    (base/'.throne-gtk-manual').touch()
-    (base/'Throne GTK.app').mkdir()
-    core = base/'Throne GTK.app/Contents/MacOS/throne-gtk-core'
+    (base/'.nolurix-package').write_text('manual\n')
+    (base/'.nolurix-manual').touch()
+    (base/'Nolurix.app').mkdir()
+    core = base/'Nolurix.app/Contents/MacOS/nolurix-core'
     core.parent.mkdir(parents=True)
     core.write_text('#!/bin/sh\n[ "$1" = --recover-dns ] || exit 2\necho recover >> "$EVENTS"\n[ "${DNS_FAIL:-0}" = 0 ]\n')
     core.chmod(0o755)
-    plist = fixture/'Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist'
+    plist = fixture/'Library/LaunchDaemons/dev.nalart.Nolurix.helper.plist'
     plist.write_text('owned')
     (base/'manual-helper.plist').write_text('owned')
-    link = fixture/'Applications/Throne GTK.app'
+    link = fixture/'Applications/Nolurix.app'
     link.write_text('foreign')
     preflight(False)
     assert link.read_text() == 'foreign' and not events.exists()
@@ -226,7 +293,7 @@ with tempfile.TemporaryDirectory() as tmp:
     result = subprocess.run(['bash', str(uninstaller)], env=dict(env, DNS_FAIL='1', ACL_TEXT=' 0: group:everyone allow read,readattr,readsecurity'), stderr=subprocess.DEVNULL)
     assert result.returncode != 0
     assert events.read_text() == 'stop\nrecover\n'
-    assert plist.exists() and core.exists() and (base/'.throne-gtk-package').exists()
+    assert plist.exists() and core.exists() and (base/'.nolurix-package').exists()
     run = base/'run'
     run.mkdir()
     (run/'helper.lock').touch()

@@ -1,15 +1,15 @@
-#ifndef THRONE_DNS_NATIVE_H
-#define THRONE_DNS_NATIVE_H
-#define THRONE_DNS_PREFS_BUSY 10004
-typedef struct throne_dns_tx throne_dns_tx;
-throne_dns_tx *throne_dns_begin(const char *, const char *, const char *, int *);
-const char *throne_dns_service(throne_dns_tx *);
-const char *throne_dns_location(throne_dns_tx *);
-unsigned char *throne_dns_snapshot(throne_dns_tx *, const char *, int *, int *);
-int throne_dns_equal(const unsigned char *, int, const unsigned char *, int);
-int throne_dns_set(throne_dns_tx *, const unsigned char *, int, int *);
-int throne_dns_commit(throne_dns_tx *, int *);
-int throne_dns_apply(throne_dns_tx *, int *);
-void throne_dns_end(throne_dns_tx *);
-int throne_dns_safe_acl(int);
+#ifndef NOLURIX_DNS_NATIVE_H
+#define NOLURIX_DNS_NATIVE_H
+#define NOLURIX_DNS_PREFS_BUSY 10004
+typedef struct nolurix_dns_tx nolurix_dns_tx;
+nolurix_dns_tx *nolurix_dns_begin(const char *, const char *, const char *, int *);
+const char *nolurix_dns_service(nolurix_dns_tx *);
+const char *nolurix_dns_location(nolurix_dns_tx *);
+unsigned char *nolurix_dns_snapshot(nolurix_dns_tx *, const char *, int *, int *);
+int nolurix_dns_equal(const unsigned char *, int, const unsigned char *, int);
+int nolurix_dns_set(nolurix_dns_tx *, const unsigned char *, int, int *);
+int nolurix_dns_commit(nolurix_dns_tx *, int *);
+int nolurix_dns_apply(nolurix_dns_tx *, int *);
+void nolurix_dns_end(nolurix_dns_tx *);
+int nolurix_dns_safe_acl(int);
 #endif

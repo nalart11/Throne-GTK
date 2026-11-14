@@ -1,11 +1,26 @@
 #!/bin/bash
 set -eu
-fail() { echo "Throne GTK: $*" >&2; exit 1; }
+fail() { echo "Nolurix: $*" >&2; exit 1; }
 [ "${3:-/}" = / ] || fail "Offline-volume installation is not supported."
-base='/Library/Application Support/Throne GTK'
-app="$base/Throne GTK.app"
-link='/Applications/Throne GTK.app'
-label=dev.nalart.ThroneGtk.helper
+# Refuse the old product before running any installed code or mutating anything.
+# An unloaded service does NOT prove that SMAppService was unregistered.
+legacy_fail() {
+    fail 'Legacy Throne GTK installation detected. As the owning logged-in user, run the verified original Throne GTK app with --unregister-helper; then verify and run that build’s original protected uninstaller (including DNS recovery, with --sm-unregistered when required). Do not merely bootout the service or delete its files. Retry only after the original uninstall completes.'
+}
+for legacy in '/Library/Application Support/Throne GTK' '/Applications/Throne GTK.app' \
+    /Library/LaunchDaemons/dev.nalart.ThroneGtk.helper.plist \
+    /Library/LaunchDaemons/dev.nalart.ThroneGtk.manual-helper.plist; do
+    [ ! -e "$legacy" ] && [ ! -L "$legacy" ] || legacy_fail
+done
+for legacy_label in dev.nalart.ThroneGtk.helper dev.nalart.ThroneGtk.manual-helper; do
+    if /bin/launchctl print "system/$legacy_label" >/dev/null 2>&1; then
+        legacy_fail
+    fi
+done
+base='/Library/Application Support/Nolurix'
+app="$base/Nolurix.app"
+link='/Applications/Nolurix.app'
+label=dev.nalart.Nolurix.helper
 acl_check="$(dirname "$0")/check-install-acl"
 # Package-owned native reader, never a mutable installed executable. Reject
 # mutation ACEs, including inherited grants, before Installer extracts anything.
@@ -16,37 +31,37 @@ for dir in /Library '/Library/Application Support' /Applications /Library/Launch
 done
 if [ -e "$base" ] || [ -L "$base" ]; then
     "$acl_check" --tree "$base" || fail 'Existing private installation has unsafe ownership, modes or ACL mutation grants.'
-    [ ! -L "$base" ] && [ -f "$base/.throne-gtk-package" ] && [ ! -L "$base/.throne-gtk-package" ] || fail "Foreign install directory: $base"
+    [ ! -L "$base" ] && [ -f "$base/.nolurix-package" ] && [ ! -L "$base/.nolurix-package" ] || fail "Foreign install directory: $base"
     [ "$(/usr/bin/stat -f %u "$base")" = 0 ] || fail "Install directory is not root-owned"
-    [ "$(/bin/cat "$base/.throne-gtk-package")" = "$(/bin/cat "$(dirname "$0")/mode")" ] || fail "Changing service mode requires explicit uninstall and user-context SMAppService unregister first."
+    [ "$(/bin/cat "$base/.nolurix-package")" = "$(/bin/cat "$(dirname "$0")/mode")" ] || fail "Changing service mode requires explicit uninstall and user-context SMAppService unregister first."
     [ -z "$(/usr/bin/find "$base" ! -type l ! \( -path "$base/run/helper.sock" -type s -user root \) \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail "Existing installation is not root-protected"
 fi
 if [ -e "$app" ] || [ -L "$app" ]; then
     [ ! -L "$app" ] || fail "Bundle is a symlink"
     /usr/bin/codesign --verify --deep --strict "$app" || fail "Existing bundle signature invalid"
-    [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.ThroneGtk ] || fail "Foreign bundle"
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.Nolurix ] || fail "Foreign bundle"
 fi
 if [ -e "$link" ] || [ -L "$link" ]; then
     if [ -d "$link" ] && [ ! -L "$link" ]; then
         if /usr/bin/codesign --verify --deep --strict "$link" && \
-            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$link/Contents/Info.plist")" = dev.nalart.ThroneGtk ]; then
-            fail 'Verified legacy Throne GTK bundle detected. Unregister SMAppService through that app as its owning user, then move the old bundle aside manually and retry. No root execution or automatic deletion is performed.'
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$link/Contents/Info.plist")" = dev.nalart.Nolurix ]; then
+            fail 'Verified legacy Nolurix bundle detected. Unregister SMAppService through that app as its owning user, then move the old bundle aside manually and retry. No root execution or automatic deletion is performed.'
         fi
         fail 'Foreign or invalid /Applications bundle; nothing will be removed.'
     fi
     [ -L "$link" ] && [ "$(/usr/bin/readlink "$link")" = "$app" ] || fail "Legacy or foreign /Applications app. As its owning user, unregister SMAppService in the old app first; verify its signature and bundle ID, then move it aside manually. Installer never removes it or runs it as root."
 fi
-if [ -d "$base" ] && [ ! -f "$base/.throne-gtk-manual" ]; then
+if [ -d "$base" ] && [ ! -f "$base/.nolurix-manual" ]; then
     fail 'SMAppService upgrade requires unregistering as the logged-in user, then running the protected uninstall script with --sm-unregistered before reinstalling. This installer cannot prove an inactive registration was removed.'
 fi
 plist="/Library/LaunchDaemons/$label.plist"
 if [ -e "$plist" ] || [ -L "$plist" ]; then
     "$acl_check" --nodes "$plist" || fail 'Existing launchd plist has unsafe ownership, modes or ACL mutation grants.'
-    [ ! -L "$plist" ] && [ -f "$base/.throne-gtk-manual" ] || fail "Foreign/legacy launchd plist; unregister the old service as its user before migration."
+    [ ! -L "$plist" ] && [ -f "$base/.nolurix-manual" ] || fail "Foreign/legacy launchd plist; unregister the old service as its user before migration."
     /usr/bin/cmp -s "$plist" "$base/manual-helper.plist" || fail "Modified launchd plist"
 fi
 if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
-    [ -f "$base/.throne-gtk-manual" ] && [ -f "$plist" ] || fail "Existing SMAppService registration: unregister through the old app as the logged-in user before installing. bootout is NOT unregister."
+    [ -f "$base/.nolurix-manual" ] && [ -f "$plist" ] || fail "Existing SMAppService registration: unregister through the old app as the logged-in user before installing. bootout is NOT unregister."
     # This is deliberately the final operation, after ALL ownership checks and
     # before Installer can overwrite the payload. launchd's default process
     # group cleanup must remain enabled (no AbandonProcessGroup=true).
@@ -56,7 +71,7 @@ if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
     fi
 fi
 if [ -e "$app" ]; then
-    "$app/Contents/MacOS/throne-gtk-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; installed payload has not been replaced.'
+    "$app/Contents/MacOS/nolurix-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; installed payload has not been replaced.'
 fi
 if [ ! -e "$base" ] && [ ! -L "$base" ]; then
     # Shared ancestors were checked above. Normalize ONLY our newly created

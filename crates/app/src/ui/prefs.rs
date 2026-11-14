@@ -10,7 +10,7 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::ui::Window;
-use throne_config::settings::{DomainStrategy, Language, TunStack};
+use nolurix_config::settings::{DomainStrategy, Language, TunStack};
 
 pub fn open(window: &Rc<Window>) {
     let dialog = adw::PreferencesDialog::builder()
@@ -26,7 +26,7 @@ pub fn open(window: &Rc<Window>) {
 }
 
 /// Small helper: apply a settings change and save it.
-fn edit(window: &Rc<Window>, apply: impl FnOnce(&mut throne_config::Settings)) {
+fn edit(window: &Rc<Window>, apply: impl FnOnce(&mut nolurix_config::Settings)) {
     {
         let mut settings = window.state().settings.borrow_mut();
         apply(&mut settings);
@@ -850,7 +850,7 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
 }
 
 /// How many rules are configured, visible without opening the editor.
-fn rules_subtitle(settings: &throne_config::Settings) -> String {
+fn rules_subtitle(settings: &nolurix_config::Settings) -> String {
     let total = settings.route_rules.len();
     let enabled = settings.route_rules.iter().filter(|r| r.enabled).count();
     let raw = !settings.custom_route_rules.trim().is_empty();

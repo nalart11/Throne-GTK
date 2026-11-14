@@ -1270,6 +1270,90 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
+name = "nolurix-app"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "gtk4",
+ "ksni",
+ "libadwaita",
+ "nolurix-config",
+ "nolurix-ipc",
+ "nolurix-store",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tray-icon",
+]
+
+[[package]]
+name = "nolurix-config"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "base64",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "nolurix-ipc"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cc",
+ "libc",
+ "prost",
+ "prost-build",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nolurix-macos-bridge"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "nolurix-config",
+ "nolurix-ipc",
+ "nolurix-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "nolurix-store"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nolurix-config",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2051,89 +2135,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "throne-app"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "async-channel",
- "gtk4",
- "ksni",
- "libadwaita",
- "reqwest",
- "serde",
- "serde_json",
- "throne-config",
- "throne-ipc",
- "throne-store",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tray-icon",
-]
-
-[[package]]
-name = "throne-config"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "base64",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "throne-ipc"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "bytes",
- "cc",
- "libc",
- "prost",
- "prost-build",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "throne-macos-bridge"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "async-channel",
- "serde",
- "serde_json",
- "tempfile",
- "throne-config",
- "throne-ipc",
- "throne-store",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "throne-store"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "throne-config",
- "tracing",
 ]
 
 [[package]]

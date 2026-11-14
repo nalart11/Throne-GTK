@@ -6,7 +6,7 @@ members = ["crates/ipc", "crates/config", "crates/store", "crates/app", "crates/
 version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/nalart/throne-gtk"
+repository = "https://github.com/nalart11/Nolurix"
 
 [workspace.dependencies]
 anyhow = "1"

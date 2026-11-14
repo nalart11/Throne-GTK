@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>ru</string>
     <key>CFBundleDisplayName</key>
-    <string>Throne GTK</string>
+    <string>Nolurix</string>
     <key>CFBundleExecutable</key>
-    <string>throne-gtk</string>
+    <string>nolurix</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.nalart.ThroneGtk</string>
+    <string>dev.nalart.Nolurix</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Throne GTK</string>
+    <string>Nolurix</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

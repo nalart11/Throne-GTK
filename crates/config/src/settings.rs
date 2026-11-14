@@ -207,7 +207,7 @@ impl Default for Settings {
 
             sub_auto_update: false,
             sub_auto_update_minutes: 360,
-            sub_user_agent: concat!("throne-gtk/", env!("CARGO_PKG_VERSION")).into(),
+            sub_user_agent: concat!("nolurix/", env!("CARGO_PKG_VERSION")).into(),
             sub_send_hwid: false,
             sub_custom_hwid_params: String::new(),
 

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Run from the protected installation after unregistering in the user's GUI.
 set -eu
-fail() { echo "Throne GTK: $*" >&2; exit 1; }
+fail() { echo "Nolurix: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'Run with administrator authorization after unregistering SMAppService as the logged-in user.'
-base='/Library/Application Support/Throne GTK'
-app="$base/Throne GTK.app"
-link='/Applications/Throne GTK.app'
-label=dev.nalart.ThroneGtk.helper
+base='/Library/Application Support/Nolurix'
+app="$base/Nolurix.app"
+link='/Applications/Nolurix.app'
+label=dev.nalart.Nolurix.helper
 plist="/Library/LaunchDaemons/$label.plist"
 acl_check="$base/check-install-acl"
 # Bootstrap the installed checker using system tools only. A conservative
@@ -39,17 +39,17 @@ done
 for dir in /Library '/Library/Application Support' "$base" "$app" /Applications /Library/LaunchDaemons; do
     [ -d "$dir" ] && [ ! -L "$dir" ] || fail "Unsafe directory: $dir"
 done
-[ -f "$base/.throne-gtk-package" ] && [ ! -L "$base/.throne-gtk-package" ] || fail 'Missing ownership marker'
+[ -f "$base/.nolurix-package" ] && [ ! -L "$base/.nolurix-package" ] || fail 'Missing ownership marker'
 [ "$(/usr/bin/stat -f %u "$base")" = 0 ] || fail 'Not root-owned'
 [ -z "$(/usr/bin/find "$base" ! -type l ! \( -path "$base/run/helper.sock" -type s -user root \) \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail 'Installation is not root-protected'
 /usr/bin/codesign --verify --deep --strict "$app" || fail 'Invalid app signature'
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.ThroneGtk ] || fail 'Foreign bundle'
-if [ ! -f "$base/.throne-gtk-manual" ]; then
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.Nolurix ] || fail 'Foreign bundle'
+if [ ! -f "$base/.nolurix-manual" ]; then
     [ "${1:-}" = --sm-unregistered ] || fail 'As the logged-in user (NOT root), run the installed app executable with --unregister-helper first; then confirm here with --sm-unregistered. Root cannot unregister on behalf of that user.'
 fi
 if [ -e "$plist" ] || [ -L "$plist" ]; then
     "$acl_check" --nodes "$plist" || fail 'Unsafe service plist ownership, modes or ACLs'
-    [ -f "$base/.throne-gtk-manual" ] && [ ! -L "$plist" ] || fail 'Foreign or SM-managed service; unregister in user context first'
+    [ -f "$base/.nolurix-manual" ] && [ ! -L "$plist" ] || fail 'Foreign or SM-managed service; unregister in user context first'
     /usr/bin/cmp -s "$plist" "$base/manual-helper.plist" || fail 'Modified service plist; refusing removal'
     if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
         /bin/launchctl bootout "system/$label" || fail 'Could not stop helper; no executable or plist removed'
@@ -60,7 +60,7 @@ if [ -e "$plist" ] || [ -L "$plist" ]; then
 elif /bin/launchctl print "system/$label" >/dev/null 2>&1; then
     fail 'SMAppService is still registered. Unregister through the app as the logged-in user, not as root; bootout is not unregister.'
 fi
-"$app/Contents/MacOS/throne-gtk-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; all installed artifacts preserved'
+"$app/Contents/MacOS/nolurix-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; all installed artifacts preserved'
 # Only after the service is stopped and recovery succeeds may its permanent
 # singleton inode be removed. Preserve unknown runtime files.
 /bin/rm -f "$base/run/helper.sock" "$base/run/helper.lock"
@@ -74,5 +74,5 @@ fi
 # Preserve all profiles, preferences, logs and shared directories. Deliberately
 # leave unknown files in the private directory rather than recursively deleting it.
 /bin/rm -rf "$app"
-/bin/rm -f "$base/.throne-gtk-package" "$base/.throne-gtk-manual" "$base/manual-helper.plist" "$base/check-install-acl" "$base/uninstall.sh"
+/bin/rm -f "$base/.nolurix-package" "$base/.nolurix-manual" "$base/manual-helper.plist" "$base/check-install-acl" "$base/uninstall.sh"
 /bin/rmdir "$base" 2>/dev/null || true

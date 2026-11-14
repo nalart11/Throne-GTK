@@ -1,3 +1,7 @@
+> Historical pre-rebrand record. Commands, paths, outputs and pass/fail evidence
+> below describe the former Throne GTK build, not validation of Nolurix. They
+> are intentionally preserved. See [migration guidance](MIGRATION.md).
+
 # Stage 0 stabilization — verification record
 
 Date: 2026-11-12. Host: Linux x86_64. Status: **incomplete; native macOS validation required**.

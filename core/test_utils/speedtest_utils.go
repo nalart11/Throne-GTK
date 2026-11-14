@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ThroneGtkCore/internal"
-	"ThroneGtkCore/internal/boxbox"
+	"github.com/nalart11/Nolurix/core/internal"
+	"github.com/nalart11/Nolurix/core/internal/boxbox"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/service"

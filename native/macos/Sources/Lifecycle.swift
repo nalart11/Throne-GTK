@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 
-@MainActor func throneResource(_ name: String, extension ext: String) -> URL? {
+@MainActor func nolurixResource(_ name: String, extension ext: String) -> URL? {
     if let url = Bundle.main.url(forResource: name, withExtension: ext) { return url }
     let executable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
     let url = executable.deletingLastPathComponent().appendingPathComponent("Resources").appendingPathComponent("\(name).\(ext)")
@@ -52,11 +52,11 @@ enum NativeMenuLocalizer {
 
     private static func localizeItems(in menu: NSMenu, ru: Bool) {
         let titles: [String: (String, String)] = [
-            "orderFrontStandardAboutPanel:": ("О программе Throne GTK", "About Throne GTK"),
-            "hide:": ("Скрыть Throne GTK", "Hide Throne GTK"),
+            "orderFrontStandardAboutPanel:": ("О программе Nolurix", "About Nolurix"),
+            "hide:": ("Скрыть Nolurix", "Hide Nolurix"),
             "hideOtherApplications:": ("Скрыть остальные", "Hide Others"),
             "unhideAllApplications:": ("Показать все", "Show All"),
-            "terminate:": ("Выйти из Throne GTK", "Quit Throne GTK"),
+            "terminate:": ("Выйти из Nolurix", "Quit Nolurix"),
             "undo:": ("Отменить", "Undo"), "redo:": ("Повторить", "Redo"),
             "cut:": ("Вырезать", "Cut"), "copy:": ("Копировать", "Copy"),
             "paste:": ("Вставить", "Paste"), "pasteAsPlainText:": ("Вставить и подобрать стиль", "Paste and Match Style"),
@@ -87,7 +87,7 @@ enum NativeMenuLocalizer {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
-        if let url = throneResource("ThroneSymbolic", extension: "png"), let image = NSImage(contentsOf: url) {
+        if let url = nolurixResource("NolurixSymbolic", extension: "png"), let image = NSImage(contentsOf: url) {
             let maxSize = NSSize(width: 20, height: 20)
             let scale = min(maxSize.width / image.size.width, maxSize.height / image.size.height)
             image.size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
@@ -95,9 +95,9 @@ enum NativeMenuLocalizer {
         } else {
             // A diagnostic, never a substitute SF-symbol logo.
             item.button?.title = "!"
-            NSLog("Throne: missing Resources/ThroneSymbolic.png; status logo unavailable")
+            NSLog("Nolurix: missing Resources/NolurixSymbolic.png; status logo unavailable")
         }
-        item.button?.toolTip = "Throne GTK"
+        item.button?.toolTip = "Nolurix"
         updateMenu()
         localizeMainMenu()
         menuTrackingObserver = NotificationCenter.default.addObserver(
@@ -117,7 +117,7 @@ enum NativeMenuLocalizer {
     }
     private func updateMenu() {
         let menu = NSMenu()
-        let show = NSMenuItem(title: model?.tr("Показать Throne GTK", "Show Throne GTK") ?? "Показать Throne GTK", action: #selector(showWindow), keyEquivalent: "")
+        let show = NSMenuItem(title: model?.tr("Показать Nolurix", "Show Nolurix") ?? "Показать Nolurix", action: #selector(showWindow), keyEquivalent: "")
         show.target = self; menu.addItem(show); menu.addItem(.separator())
         let quit = NSMenuItem(title: model?.tr("Выйти", "Quit") ?? "Выйти", action: #selector(quit), keyEquivalent: "q")
         quit.target = self; menu.addItem(quit); statusItem?.menu = menu
@@ -128,10 +128,10 @@ enum NativeMenuLocalizer {
     }
     func registerMainWindow(_ window: NSWindow) {
         guard mainWindow !== window else { return }
-        mainWindow = window; window.identifier = NSUserInterfaceItemIdentifier("throne-main"); window.delegate = self
+        mainWindow = window; window.identifier = NSUserInterfaceItemIdentifier("nolurix-main"); window.delegate = self
     }
     @objc func showWindow() {
-        guard let mainWindow else { NSLog("Throne: main window not registered yet"); return }
+        guard let mainWindow else { NSLog("Nolurix: main window not registered yet"); return }
         if mainWindow.isMiniaturized { mainWindow.deminiaturize(nil) }
         mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
@@ -155,7 +155,7 @@ enum NativeMenuLocalizer {
             guard let self else { return }
             if success { sender.reply(toApplicationShouldTerminate: true); return }
             let alert = NSAlert()
-            alert.messageText = model.tr("Не удалось безопасно закрыть Throne GTK", "Throne GTK could not close safely")
+            alert.messageText = model.tr("Не удалось безопасно закрыть Nolurix", "Nolurix could not close safely")
             alert.informativeText = model.tr("Остановка ещё не подтверждена. Повторите выход с тем же подключением к мосту или оставьте окно диагностики открытым.", "Shutdown is unconfirmed. Retry using the same bridge handle, or keep the diagnostic window open.")
             alert.addButton(withTitle: model.tr("Повторить", "Retry"))
             alert.addButton(withTitle: model.tr("Оставить открытым", "Keep Open"))

@@ -1,4 +1,4 @@
-# Build and run Throne GTK.
+# Build and run Nolurix.
 set unstable
 set lists
 
@@ -16,7 +16,7 @@ run-app: build
     set -euo pipefail
     suffix=""
     [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
-    "./build/throne-gtk${suffix}"
+    "./build/nolurix${suffix}"
 
 # Build everything: core and interface
 [group('build')]
@@ -44,7 +44,7 @@ build-core:
     fi
     version="$(cd core && go list -m -f '{{{{.Version}}' github.com/sagernet/sing-box)"
     (cd core && CGO_ENABLED="$cgo" CGO_LDFLAGS="$cgo_ldflags" \
-        go build -o "../build/throne-gtk-core${suffix}" -trimpath \
+        go build -o "../build/nolurix-core${suffix}" -trimpath \
         -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=${version}' -checklinkname=0" \
         -tags "$tags")
 
@@ -83,15 +83,15 @@ build-app:
     mkdir -p build
     if [[ "$(go env GOOS)" == "darwin" ]]; then
         ./native/macos/build.sh
-        install -m755 native/macos/.build/throne-gtk build/throne-gtk
+        install -m755 native/macos/.build/nolurix build/nolurix
         mkdir -p build/Resources
         cp -R native/macos/.build/Resources/. build/Resources/
         exit 0
     fi
     suffix=""
     [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
-    cargo build {{ if RELEASE == "true" { "--release" } }} -p throne-app
-    cp "target/{{ if RELEASE == "true" { "release" } else { "debug" } }}/throne-gtk${suffix}" build/
+    cargo build {{ if RELEASE == "true" { "--release" } }} -p nolurix-app
+    cp "target/{{ if RELEASE == "true" { "release" } else { "debug" } }}/nolurix${suffix}" build/
 
 # Place libcronet near core to enable Naive
 [group('build')]
@@ -139,7 +139,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        cargo test --workspace --exclude throne-app
+        cargo test --workspace --exclude nolurix-app
         ./native/macos/verify-frontend.sh
     else
         cargo test --workspace
@@ -148,21 +148,21 @@ test:
 # Optional GTK frontend tests, including on macOS with GTK installed.
 [group('test')]
 test-gtk:
-    cargo test -p throne-app
+    cargo test -p nolurix-app
 
 # End-to-end check with real data: import from Throne and validate configs with the core.
-# The binary is copied under the name throne-gtk — the core does not accept another parent.
+# The binary is copied under the name nolurix — the core does not accept another parent.
 [group('test')]
 selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     suffix=""
     [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
-    cargo build -p throne-app --example selftest
+    cargo build -p nolurix-app --example selftest
     mkdir -p target/selftest
-    cp "target/debug/examples/selftest${suffix}" "target/selftest/throne-gtk${suffix}"
-    cp "build/throne-gtk-core${suffix}" target/selftest/
-    "./target/selftest/throne-gtk${suffix}"
+    cp "target/debug/examples/selftest${suffix}" "target/selftest/nolurix${suffix}"
+    cp "build/nolurix-core${suffix}" target/selftest/
+    "./target/selftest/nolurix${suffix}"
 
 # Loopback-only IPC/lifecycle smoke; uses the existing core without rebuilding Go.
 [group('test')]
@@ -171,13 +171,13 @@ ipc-smoke:
     set -euo pipefail
     suffix=""
     [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && suffix=".exe"
-    cargo build --example ipc_smoke -p throne-app
+    cargo build --example ipc_smoke -p nolurix-app
     test -x "target/debug/examples/ipc_smoke${suffix}"
-    test -x "build/throne-gtk-core${suffix}"
+    test -x "build/nolurix-core${suffix}"
     mkdir -p target/ipc-smoke
-    cp "target/debug/examples/ipc_smoke${suffix}" "target/ipc-smoke/throne-gtk${suffix}"
-    cp "build/throne-gtk-core${suffix}" "target/ipc-smoke/throne-gtk-core${suffix}"
-    "./target/ipc-smoke/throne-gtk${suffix}"
+    cp "target/debug/examples/ipc_smoke${suffix}" "target/ipc-smoke/nolurix${suffix}"
+    cp "build/nolurix-core${suffix}" "target/ipc-smoke/nolurix-core${suffix}"
+    "./target/ipc-smoke/nolurix${suffix}"
 
 # Clean build data
 clean:
@@ -187,57 +187,70 @@ clean:
 # Grant the core TUN permissions (repeat after each reinstallation: the file is recreated)
 [group('installation')]
 grant-tun:
-    sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep build/throne-gtk-core
+    sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep build/nolurix-core
 
 # Install to ~/.local: the application will appear in the application list
 [group('installation')]
-install: build grant-tun
+install: build
     #!/usr/bin/env bash
     set -euo pipefail
     root="."
     prefix="${PREFIX:-$HOME/.local}"
-    libdir="$prefix/lib/throne-gtk"
+    libdir="$prefix/lib/nolurix"
+    python3 scripts/uninstall-linux.py --check-install "$prefix"
+    mkdir -p "$prefix/share/applications"
 
-    for binary in throne-gtk throne-gtk-core; do
+    for binary in nolurix nolurix-core; do
         if [[ ! -x "$root/build/$binary" ]]; then
             echo "Нет $root/build/$binary — сначала соберите проект (just build)" >&2
             exit 1
         fi
     done
 
-    install -Dm755 "$root/build/throne-gtk"      "$libdir/throne-gtk"
-    install -Dm755 "$root/build/throne-gtk-core" "$libdir/throne-gtk-core"
+    install -Dm755 "$root/build/nolurix"      "$libdir/nolurix"
+    install -Dm755 "$root/build/nolurix-core" "$libdir/nolurix-core"
     if [[ -f "$root/build/libcronet.so" ]]; then
         install -Dm644 "$root/build/libcronet.so" "$libdir/libcronet.so"
     fi
 
-    install -Dm644 "$root/resources/icons/dev.nalart.ThroneGtk.svg" \
-        "$prefix/share/icons/hicolor/scalable/apps/dev.nalart.ThroneGtk.svg"
-    install -Dm644 "$root/resources/icons/dev.nalart.ThroneGtk-symbolic.svg" \
-        "$prefix/share/icons/hicolor/symbolic/apps/dev.nalart.ThroneGtk-symbolic.svg"
+    install -Dm644 "$root/resources/icons/dev.nalart.Nolurix.svg" \
+        "$prefix/share/icons/hicolor/scalable/apps/dev.nalart.Nolurix.svg"
+    install -Dm644 "$root/resources/icons/dev.nalart.Nolurix-symbolic.svg" \
+        "$prefix/share/icons/hicolor/symbolic/apps/dev.nalart.Nolurix-symbolic.svg"
 
-    sed "s|@EXEC@|$libdir/throne-gtk|" "$root/resources/throne-gtk.desktop" \
-        > "$prefix/share/applications/dev.nalart.ThroneGtk.desktop"
-    chmod 644 "$prefix/share/applications/dev.nalart.ThroneGtk.desktop"
+    sed "s|@EXEC@|$libdir/nolurix|" "$root/resources/nolurix.desktop" \
+        > "$prefix/share/applications/dev.nalart.Nolurix.desktop"
+    chmod 644 "$prefix/share/applications/dev.nalart.Nolurix.desktop"
 
     mkdir -p "$prefix/bin"
-    ln -sf "$libdir/throne-gtk" "$prefix/bin/throne-gtk"
+    ln -sf "$libdir/nolurix" "$prefix/bin/nolurix"
+    python3 scripts/uninstall-linux.py --record "$prefix"
+
+    # Record the completed payload before authorization: a denied grant must leave
+    # a recognized, retryable installation, not unowned files or a stale manifest.
+    # Copying drops capabilities; grant only the installed core and fail visibly.
+    sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep "$libdir/nolurix-core"
 
     # Make the desktop entry and icon appear without logging into the session again.
     command -v update-desktop-database >/dev/null && update-desktop-database "$prefix/share/applications" || true
     command -v gtk4-update-icon-cache >/dev/null && gtk4-update-icon-cache -f -t "$prefix/share/icons/hicolor" 2>/dev/null || true
 
     echo "Установлено в $libdir
-    Ярлык: $prefix/share/applications/dev.nalart.ThroneGtk.desktop
-    Команда: throne-gtk (если $prefix/bin есть в PATH)
+    Ярлык: $prefix/share/applications/dev.nalart.Nolurix.desktop
+    Команда: nolurix (если $prefix/bin есть в PATH)
 
-    Для режима VPN выдайте ядру права:
-      sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep $libdir/throne-gtk-core
+    Права для режима VPN выданы установленному ядру. Для повторной выдачи:
+      sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep $libdir/nolurix-core
     или из каталога репозитория:
-      just grant-tun
+      just grant-installed-tun
 
-    Права живут на самом файле, а установка создаёт его заново — повторяйте
-    эту команду после каждой переустановки."
+    Права живут на самом файле; just install повторно выдаёт их после копирования."
+    echo "Legacy throne-gtk files/data are retained. Review old launchers/desktop entries before removing them manually."
+
+# Explicitly grant TUN permissions to the installed core, not the build copy.
+[group('installation')]
+grant-installed-tun:
+    sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep "${PREFIX:-$HOME/.local}/lib/nolurix/nolurix-core"
 
 # Remove the installation (profiles and settings remain)
 [group('installation')]
@@ -245,10 +258,6 @@ uninstall:
     #!/usr/bin/env bash
     set -euo pipefail
     prefix="${PREFIX:-$HOME/.local}"
-    rm -rf "$prefix/lib/throne-gtk"
-    rm -f "$prefix/bin/throne-gtk"
-    rm -f "$prefix/share/applications/dev.nalart.ThroneGtk.desktop"
-    rm -f "$prefix/share/icons/hicolor/scalable/apps/dev.nalart.ThroneGtk.svg"
-    rm -f "$prefix/share/icons/hicolor/symbolic/apps/dev.nalart.ThroneGtk-symbolic.svg"
+    python3 scripts/uninstall-linux.py "$prefix"
     command -v update-desktop-database >/dev/null && update-desktop-database "$prefix/share/applications" || true
-    echo "Удалено. Профили и настройки остались в ~/.config/throne-gtk"
+    echo "Удалено. Профили и настройки остались в ~/.config/nolurix"

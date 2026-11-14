@@ -8,8 +8,8 @@ use crate::engine::Command;
 use crate::i18n::tr;
 use crate::paths;
 use crate::ui::Window;
-use throne_config::link;
-use throne_config::profile::Group;
+use nolurix_config::link;
+use nolurix_config::profile::Group;
 
 /// One window for both adding methods: paste links or subscribe.
 /// They are separated by headings rather than tabs; the choice is obvious from
@@ -287,17 +287,21 @@ pub fn import_dialog(window: &Rc<Window>) {
 
 pub fn about(window: &Rc<Window>) {
     let about = adw::AboutDialog::builder()
-        .application_name("Throne GTK")
+        .application_name("Nolurix")
         .application_icon("network-server-symbolic")
         .version(env!("CARGO_PKG_VERSION"))
-        .developer_name(tr("Форк Throne на GTK4", "GTK4 fork of Throne"))
+        .developer_name("Nolurix contributors")
         .comments(
-            tr("Клиент прокси на ядре sing-box и Xray.\n\
-             Форк Throne с интерфейсом на GTK4 и libadwaita.", "Proxy client powered by sing-box and Xray.\nA Throne fork with a GTK4 and libadwaita interface."),
+            tr("Nolurix — независимый клиент прокси на ядре sing-box и Xray.\n\
+             Интерфейс на GTK4 и libadwaita.", "Nolurix — an independent proxy client powered by sing-box and Xray.\nBuilt with GTK4 and libadwaita."),
         )
         .license_type(gtk::License::Gpl30)
-        .website("https://github.com/throneproj/Throne")
+        .website("https://github.com/nalart11/Nolurix")
         .build();
+    about.add_credit_section(
+        Some(tr("На основе проекта", "Originally based on")),
+        &["Throne contributors https://github.com/throneproj/Throne"],
+    );
     about.present(Some(&window.root));
 }
 

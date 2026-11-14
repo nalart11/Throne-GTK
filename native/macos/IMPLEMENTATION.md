@@ -1,3 +1,7 @@
+> Historical pre-rebrand record. Commands, paths, outputs and pass/fail evidence
+> below describe the former Throne GTK build, not validation of Nolurix. They
+> are intentionally preserved. See [migration guidance](../../docs/MIGRATION.md).
+
 # Native macOS implementation
 
 ## Integration boundary

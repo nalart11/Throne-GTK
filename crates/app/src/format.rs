@@ -1,7 +1,7 @@
 //! Unified number formatting: the same representation in the list, status, and
 //! connections table.
 
-use throne_config::settings::Language;
+use nolurix_config::settings::Language;
 
 pub fn bytes(value: i64) -> String {
     bytes_for(value, crate::i18n::language())

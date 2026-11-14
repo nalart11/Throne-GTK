@@ -1,9 +1,9 @@
 package boxdns
 
 import (
-	"ThroneGtkCore/internal/boxdns/winipcfg"
 	"encoding/binary"
 	"github.com/gofrs/uuid/v5"
+	"github.com/nalart11/Nolurix/core/internal/boxdns/winipcfg"
 	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/windnsapi"

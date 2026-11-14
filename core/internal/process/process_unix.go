@@ -127,7 +127,7 @@ func unprivilegedIDs() (int, int, bool) {
 	if uid != 0 {
 		return uid, gid, true
 	}
-	uidValue, gidValue := os.Getenv("THRONE_CORE_CLIENT_UID"), os.Getenv("THRONE_CORE_CLIENT_GID")
+	uidValue, gidValue := os.Getenv("NOLURIX_CORE_CLIENT_UID"), os.Getenv("NOLURIX_CORE_CLIENT_GID")
 	if uidValue == "" || gidValue == "" {
 		return 0, 0, false
 	}

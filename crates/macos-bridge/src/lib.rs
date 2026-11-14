@@ -12,6 +12,8 @@ mod paths;
 
 use anyhow::{anyhow, bail, Context, Result};
 use engine::{Command, Engine, Event, Status};
+use nolurix_config::{profile::Group, Profile, Settings};
+use nolurix_store::Store;
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, VecDeque},
@@ -20,8 +22,6 @@ use std::{
     sync::{mpsc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use throne_config::{profile::Group, Profile, Settings};
-use throne_store::Store;
 
 const INPUT_CAP: usize = 4 * 1024 * 1024;
 type Reply = mpsc::Sender<Result<Value>>;
@@ -59,7 +59,7 @@ fn logs_for_worker() -> Result<async_channel::Receiver<Event>> {
             .try_init()
             .map_err(|e| e.to_string())?;
         std::thread::Builder::new()
-            .name("throne-log-router".into())
+            .name("nolurix-log-router".into())
             .spawn(move || {
                 while let Ok(event) = rx.recv_blocking() {
                     if let Ok(sink) = LOG_SINK.lock() {
@@ -109,19 +109,19 @@ fn boundary(f: impl FnOnce() -> Result<Value>) -> *mut c_char {
         .into_raw()
 }
 #[no_mangle]
-pub unsafe extern "C" fn throne_macos_open(p: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn nolurix_macos_open(p: *const c_char) -> *mut c_char {
     boundary(|| open(input(p)?))
 }
 #[no_mangle]
-pub unsafe extern "C" fn throne_macos_request(h: u64, p: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn nolurix_macos_request(h: u64, p: *const c_char) -> *mut c_char {
     boundary(|| call(h, |r| Ok(Message::Request(input(p)?, r))))
 }
 #[no_mangle]
-pub extern "C" fn throne_macos_poll(h: u64, ms: u32) -> *mut c_char {
+pub extern "C" fn nolurix_macos_poll(h: u64, ms: u32) -> *mut c_char {
     boundary(|| call(h, |r| Ok(Message::Poll(ms.min(1000), r))))
 }
 #[no_mangle]
-pub extern "C" fn throne_macos_close(h: u64) -> *mut c_char {
+pub extern "C" fn nolurix_macos_close(h: u64) -> *mut c_char {
     boundary(|| close_with_timeout(h, Duration::from_secs(7)))
 }
 fn close_with_timeout(h: u64, timeout: Duration) -> Result<Value> {
@@ -161,7 +161,7 @@ fn record_closed(h: u64) -> Result<()> {
     Ok(())
 }
 #[no_mangle]
-pub unsafe extern "C" fn throne_macos_string_free(p: *mut c_char) {
+pub unsafe extern "C" fn nolurix_macos_string_free(p: *mut c_char) {
     if !p.is_null() {
         drop(CString::from_raw(p));
     }
@@ -187,15 +187,18 @@ fn open(options: Value) -> Result<Value> {
     if *active {
         bail!("another bridge engine is active or its shutdown is unconfirmed");
     }
-    let dir = options
-        .get("data_dir")
+    // Overrides are deliberately isolated from automatic default migration.
+    let explicit_dir = options
+        .get("config_dir")
+        .or_else(|| options.get("data_dir"));
+    let explicit_path = explicit_dir
         .map(|v| {
             v.as_str()
                 .map(PathBuf::from)
                 .context("data_dir must be a string")
         })
-        .transpose()?
-        .unwrap_or_else(paths::config_dir);
+        .transpose()?;
+    let dir = paths::config_for_override(explicit_path.as_deref())?;
     let core = options
         .get("core_path")
         .and_then(Value::as_str)
@@ -205,7 +208,7 @@ fn open(options: Value) -> Result<Value> {
     let (ready, initialized) = mpsc::channel();
     *active = true;
     if let Err(e) = std::thread::Builder::new()
-        .name("throne-macos-store".into())
+        .name("nolurix-macos-store".into())
         .spawn(move || {
             let mut state = match State::new(dir, core) {
                 Ok(s) => {
@@ -322,7 +325,7 @@ fn now() -> i64 {
 impl State {
     fn localized<'a>(&self, ru: &'a str, en: &'a str) -> &'a str {
         match self.settings.language {
-            throne_config::settings::Language::Ru => ru,
+            nolurix_config::settings::Language::Ru => ru,
             _ => en,
         }
     }
@@ -332,7 +335,7 @@ impl State {
         self.store.save_settings(&self.settings)
     }
     fn new(dir: PathBuf, core: PathBuf) -> Result<Self> {
-        let store = Store::open(&dir.join("throne-gtk.db"))?;
+        let store = Store::open(&dir.join("nolurix.db"))?;
         let mut settings = store.settings()?;
         settings.cache_file = dir.join("cache.db").to_string_lossy().into_owned();
         LOCALE.get_or_init(|| i18n::init(settings.language));
@@ -523,7 +526,7 @@ impl State {
                 self.mutable()?;
                 let g = gid()?;
                 self.store.group(g)?.context("group not found")?;
-                let parsed = throne_config::subscription::parse(
+                let parsed = nolurix_config::subscription::parse(
                     v["text"].as_str().context("missing text")?,
                 )?;
                 let mut n = 0;
@@ -680,7 +683,7 @@ impl State {
                 self.notice = None;
             }
             "export_config" => {
-                let generated = throne_config::generate(&self.profile(id()?)?, &self.settings)?;
+                let generated = nolurix_config::generate(&self.profile(id()?)?, &self.settings)?;
                 return Ok(json!(generated.core_config));
             }
             _ => bail!("unknown operation: {op}"),
@@ -694,7 +697,7 @@ impl State {
         Event::Connections(c)=>self.connections=Value::Array(c.into_iter().map(|c|json!({"id":c.id,"dest":c.dest,"domain":c.domain,"network":c.network,"process":c.process,"upload":c.upload,"download":c.download,"created_at":c.created_at})).collect()),
         Event::AutoStatus{selected,pinned,alive,total,suspended}=>self.auto=json!({"selected":selected,"pinned":pinned,"alive":alive,"total":total,"suspended":suspended}),
         Event::LatencyResult{id,latency}=>{let p=self.profile(id)?;if !self.testing || self.latency.get(&id)!=Some(&fingerprint(&p)){bail!("stale latency result");}self.store.set_latency(id,latency,now())?;},
-        Event::TestFinished{tested}=>{if !self.testing{bail!("stale latency completion");}self.testing=false;self.latency.clear();let summary=match self.settings.language {throne_config::settings::Language::Ru=>format!("Проверено: {tested}"),_=>format!("Tested: {tested}")};self.notice=Some(match self.latency_error.take(){Some(error)=>format!("{summary}: {error}"),None=>summary});},
+        Event::TestFinished{tested}=>{if !self.testing{bail!("stale latency completion");}self.testing=false;self.latency.clear();let summary=match self.settings.language {nolurix_config::settings::Language::Ru=>format!("Проверено: {tested}"),_=>format!("Tested: {tested}")};self.notice=Some(match self.latency_error.take(){Some(error)=>format!("{summary}: {error}"),None=>summary});},
         Event::SpeedProgress{id,stage}=>{let p=self.profile(id)?;if self.speed_profile.as_ref()!=Some(&(id,fingerprint(&p))){bail!("stale speed progress");}self.speed=stage;},
         Event::SpeedResult{id,download,upload,country,latency,error}=>{let expected=self.speed_profile.take().context("stale speed completion")?;self.speed.clear();if expected.0!=id{self.speed_profile=Some(expected);bail!("stale speed profile ID");}if !error.is_empty(){bail!("{error}");}let p=self.profile(id)?;if fingerprint(&p)!=expected.1{bail!("stale speed result");}self.store.set_speed(id,&download,&upload,&country)?;if latency>0{self.store.set_latency(id,latency,now())?;}},
         Event::ConfigChecked(r)=>{if !self.checking{bail!("stale configuration completion");}self.checking=false;r.map_err(|e|anyhow!(e))?;self.notice=Some(self.localized("Конфигурация верна", "Configuration OK").into());},
@@ -761,12 +764,12 @@ mod tests {
     use super::*;
     unsafe fn decode(p: *mut c_char) -> Value {
         let v = serde_json::from_slice(std::ffi::CStr::from_ptr(p).to_bytes()).unwrap();
-        throne_macos_string_free(p);
+        nolurix_macos_string_free(p);
         v
     }
     unsafe fn request(h: u64, v: Value) -> Value {
         let s = CString::new(v.to_string()).unwrap();
-        decode(throne_macos_request(h, s.as_ptr()))
+        decode(nolurix_macos_request(h, s.as_ptr()))
     }
     #[test]
     fn bounded_queue_and_panic_boundary() {
@@ -784,7 +787,7 @@ mod tests {
             let result = request(h, json!({"op":"snapshot"}));
             assert_eq!(result["ok"], false);
             assert!(result["error"].as_str().unwrap().contains("queue"));
-            assert_eq!(decode(throne_macos_close(h))["ok"], false);
+            assert_eq!(decode(nolurix_macos_close(h))["ok"], false);
             assert_eq!(request(h, json!({"op":"snapshot"}))["ok"], false);
             registry().lock().unwrap().workers.remove(&h);
             assert_eq!(decode(boundary(|| panic!("contained panic")))["ok"], false);
@@ -833,17 +836,17 @@ mod tests {
         );
         unsafe {
             assert_eq!(
-                decode(throne_macos_close(h))["ok"],
+                decode(nolurix_macos_close(h))["ok"],
                 true,
                 "same-handle retry acknowledges confirmed late success"
             );
             assert_eq!(
-                decode(throne_macos_close(h))["ok"],
+                decode(nolurix_macos_close(h))["ok"],
                 false,
                 "acknowledgement consumes terminal slot"
             );
             assert_eq!(
-                decode(throne_macos_close(u64::MAX))["ok"],
+                decode(nolurix_macos_close(u64::MAX))["ok"],
                 false,
                 "unknown handles cannot acknowledge success"
             );
@@ -878,12 +881,12 @@ mod tests {
                     panic!()
                 }
             });
-            assert_eq!(decode(throne_macos_close(h))["ok"], false);
+            assert_eq!(decode(nolurix_macos_close(h))["ok"], false);
             assert_eq!(
                 request(h, json!({"op":"snapshot"}))["value"]["still_open"],
                 true
             );
-            assert_eq!(decode(throne_macos_close(h))["ok"], true);
+            assert_eq!(decode(nolurix_macos_close(h))["ok"], true);
             assert_eq!(request(h, json!({"op":"snapshot"}))["ok"], false);
             worker.join().unwrap();
         }
@@ -896,14 +899,14 @@ mod tests {
                 json!({"data_dir":dir.path(),"core_path":"/nonexistent-core"}).to_string(),
             )
             .unwrap();
-            assert_eq!(decode(throne_macos_open(std::ptr::null()))["ok"], false);
-            let opened = decode(throne_macos_open(options.as_ptr()));
+            assert_eq!(decode(nolurix_macos_open(std::ptr::null()))["ok"], false);
+            let opened = decode(nolurix_macos_open(options.as_ptr()));
             assert_eq!(opened["ok"], true, "{opened}");
             let h = opened["value"].as_u64().unwrap();
-            let _ = decode(throne_macos_poll(h, 0));
+            let _ = decode(nolurix_macos_poll(h, 0));
             assert_eq!(request(h, json!({"op":"snapshot"}))["ok"], true);
             assert_eq!(
-                decode(throne_macos_poll(h, 0))["value"],
+                decode(nolurix_macos_poll(h, 0))["value"],
                 Value::Null,
                 "snapshot must not dirty state"
             );
@@ -955,10 +958,10 @@ mod tests {
                 true
             );
             assert_eq!(request(h, json!({"op":"unknown"}))["ok"], false);
-            assert_eq!(decode(throne_macos_poll(u64::MAX, 0))["ok"], false);
+            assert_eq!(decode(nolurix_macos_poll(u64::MAX, 0))["ok"], false);
             let huge = CString::new(vec![b'x'; INPUT_CAP + 1]).unwrap();
-            assert_eq!(decode(throne_macos_request(h, huge.as_ptr()))["ok"], false);
-            throne_macos_string_free(std::ptr::null_mut());
+            assert_eq!(decode(nolurix_macos_request(h, huge.as_ptr()))["ok"], false);
+            nolurix_macos_string_free(std::ptr::null_mut());
             assert_eq!(request(h, json!({"op":"select","id":id}))["ok"], true);
             assert_eq!(
                 request(h, json!({"op":"snapshot"}))["value"]["settings"]["last_profile_id"],
@@ -988,9 +991,9 @@ mod tests {
                 request(h, json!({"op":"import_routes","path":"/missing"}))["ok"],
                 false
             );
-            assert_eq!(decode(throne_macos_close(h))["ok"], true);
+            assert_eq!(decode(nolurix_macos_close(h))["ok"], true);
             assert_eq!(request(h, json!({"op":"snapshot"}))["ok"], false);
-            let reopened = decode(throne_macos_open(options.as_ptr()));
+            let reopened = decode(nolurix_macos_open(options.as_ptr()));
             let h = reopened["value"].as_u64().unwrap();
             tracing::info!("reopened-log-sink");
             let until = Instant::now() + Duration::from_secs(2);
@@ -1015,7 +1018,7 @@ mod tests {
                 request(h, json!({"op":"group_delete","id":gid}))["ok"],
                 true
             );
-            assert_eq!(decode(throne_macos_close(h))["ok"], true);
+            assert_eq!(decode(nolurix_macos_close(h))["ok"], true);
             let mut s = State::new(dir.path().to_owned(), PathBuf::from("/missing")).unwrap();
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(
@@ -1038,7 +1041,7 @@ mod tests {
             s.checking = true;
             assert!(s.mutable().is_err());
             s.checking = false;
-            let mut p = throne_config::link::parse("trojan://pw@a.example:443#a").unwrap();
+            let mut p = nolurix_config::link::parse("trojan://pw@a.example:443#a").unwrap();
             p.gid = 1;
             let id = s.store.insert_profile(&p).unwrap();
             s.testing = true;

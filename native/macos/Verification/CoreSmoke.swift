@@ -5,14 +5,14 @@ import Foundation
 struct CoreSmoke {
     @MainActor static func main() async throws {
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-        guard executable.lastPathComponent == "throne-gtk" else {
-            throw BridgeFailure.response("Run the harness as throne-gtk to preserve core parent identity")
+        guard executable.lastPathComponent == "nolurix" else {
+            throw BridgeFailure.response("Run the harness as nolurix to preserve core parent identity")
         }
-        let core = executable.deletingLastPathComponent().appendingPathComponent("throne-gtk-core")
+        let core = executable.deletingLastPathComponent().appendingPathComponent("nolurix-core")
         guard FileManager.default.isExecutableFile(atPath: core.path) else {
             throw BridgeFailure.response("Missing adjacent built core: \(core.path)")
         }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("throne-core-check-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nolurix-core-check-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let options = try Model.encode(["data_dir": directory.path, "core_path": core.path])
         for cycle in 1...2 {

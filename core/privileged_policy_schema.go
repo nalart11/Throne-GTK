@@ -1,9 +1,9 @@
 package main
 
 import (
-	"ThroneGtkCore/gen"
 	"encoding/json"
 	"fmt"
+	"github.com/nalart11/Nolurix/core/gen"
 	"net/url"
 	"strings"
 

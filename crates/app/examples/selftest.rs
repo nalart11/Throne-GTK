@@ -2,20 +2,20 @@
 //! generate a config → validate that config with the core.
 //!
 //! Run with `just selftest`; the recipe places this binary and the core in one
-//! directory under the name `throne-gtk`, because the core rejects any other
+//! directory under the name `nolurix`, because the core rejects any other
 //! parent. It changes nothing: the database is imported into memory, the core
 //! only validates the config, and then exits.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use throne_config::generate::GeneratedConfig;
-use throne_config::Settings;
-use throne_ipc::Core;
-use throne_store::Store;
+use nolurix_config::generate::GeneratedConfig;
+use nolurix_config::Settings;
+use nolurix_ipc::Core;
+use nolurix_store::Store;
 
-fn load_request(generated: &GeneratedConfig) -> throne_ipc::pb::LoadConfigReq {
-    let mut request = throne_ipc::load_request(generated.core_config.clone());
+fn load_request(generated: &GeneratedConfig) -> nolurix_ipc::pb::LoadConfigReq {
+    let mut request = nolurix_ipc::load_request(generated.core_config.clone());
     request.need_xray = Some(generated.need_xray);
     request.xray_config = Some(generated.xray_config.clone());
     request
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     for profile in &all {
         let entry = by_kind.entry(profile.kind.clone()).or_default();
         entry.0 += 1;
-        if throne_config::generate(profile, &settings).is_ok() {
+        if nolurix_config::generate(profile, &settings).is_ok() {
             entry.1 += 1;
         }
     }
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|p| {
             p.parent()
-                .map(|d| d.join(format!("throne-gtk-core{}", std::env::consts::EXE_SUFFIX)))
+                .map(|d| d.join(format!("nolurix-core{}", std::env::consts::EXE_SUFFIX)))
         })
         .filter(|p| p.exists());
     let Some(core_bin) = core_bin else {
@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
         return Ok(());
     };
 
-    let runtime_dir = std::env::temp_dir().join("throne-gtk-selftest");
+    let runtime_dir = std::env::temp_dir().join("nolurix-selftest");
     let mut checked = 0;
     let mut failed = Vec::new();
 
@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
         if !seen.insert(profile.kind.clone()) {
             continue;
         }
-        let Ok(generated) = throne_config::generate(profile, &settings) else {
+        let Ok(generated) = nolurix_config::generate(profile, &settings) else {
             continue;
         };
         let core = Core::spawn(&core_bin, &runtime_dir, false).await?;
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
 async fn latency_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
-    profiles: &[throne_config::Profile],
+    profiles: &[nolurix_config::Profile],
 ) -> Result<()> {
     let batch: Vec<_> = profiles.iter().take(8).cloned().collect();
     if batch.is_empty() {
@@ -146,10 +146,10 @@ async fn latency_check(
     println!("\nпроверка задержек ({} серверов):", batch.len());
 
     let settings = Settings::default();
-    let generated = throne_config::generate_test(&batch, &settings)?;
+    let generated = nolurix_config::generate_test(&batch, &settings)?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
 
-    let request = throne_ipc::pb::TestReq {
+    let request = nolurix_ipc::pb::TestReq {
         config: Some(generated.core_config.clone()),
         outbound_tags: generated.tags.clone(),
         url: Some(settings.test_url.clone()),
@@ -184,14 +184,14 @@ async fn latency_check(
 async fn check_auto_selector(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
-    profiles: &[throne_config::Profile],
+    profiles: &[nolurix_config::Profile],
 ) -> Result<()> {
     let group: Vec<_> = profiles.iter().take(12).cloned().collect();
     if group.is_empty() {
         return Ok(());
     }
 
-    let generated = throne_config::generate::generate_auto(&group, &Settings::default())?;
+    let generated = nolurix_config::generate::generate_auto(&group, &Settings::default())?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
     let outcome = core.client.check_config(load_request(&generated)).await;
     core.shutdown().await;
@@ -207,7 +207,7 @@ async fn check_auto_selector(
 async fn speed_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
-    profiles: &[throne_config::Profile],
+    profiles: &[nolurix_config::Profile],
 ) -> Result<()> {
     let Some(profile) = profiles.first() else {
         return Ok(());
@@ -216,10 +216,10 @@ async fn speed_check(
 
     let mut settings = Settings::default();
     settings.speed_test_upload = true;
-    let generated = throne_config::generate_test(std::slice::from_ref(profile), &settings)?;
+    let generated = nolurix_config::generate_test(std::slice::from_ref(profile), &settings)?;
     let core = Core::spawn(core_bin, runtime_dir, false).await?;
 
-    let mut request = throne_ipc::speed_test_request(generated.core_config.clone());
+    let mut request = nolurix_ipc::speed_test_request(generated.core_config.clone());
     request.outbound_tags = generated.tags.clone();
     request.test_download = Some(true);
     request.test_upload = Some(true);
@@ -278,8 +278,8 @@ async fn check_synthetic_protocols(
     let mut failed = Vec::new();
 
     for link in LINKS {
-        let profile = throne_config::link::parse(link)?;
-        let generated = throne_config::generate(&profile, &settings)?;
+        let profile = nolurix_config::link::parse(link)?;
+        let generated = nolurix_config::generate(&profile, &settings)?;
         let core = Core::spawn(core_bin, runtime_dir, false).await?;
         let outcome = core.client.check_config(load_request(&generated)).await;
         core.shutdown().await;
@@ -304,13 +304,13 @@ async fn check_synthetic_protocols(
 async fn live_check(
     core_bin: &std::path::Path,
     runtime_dir: &std::path::Path,
-    profiles: &[throne_config::Profile],
+    profiles: &[nolurix_config::Profile],
 ) -> Result<()> {
     println!("\nживая проверка соединения:");
     let mut settings = Settings::default();
     settings.mixed_port = 21080;
     settings.cache_file = std::env::temp_dir()
-        .join("throne-gtk-selftest/cache.db")
+        .join("nolurix-selftest/cache.db")
         .to_string_lossy()
         .into_owned();
 
@@ -319,7 +319,7 @@ async fn live_check(
         if !seen.insert(profile.kind.clone()) {
             continue;
         }
-        let generated = throne_config::generate(profile, &settings)?;
+        let generated = nolurix_config::generate(profile, &settings)?;
         let core = Core::spawn(core_bin, runtime_dir, false).await?;
         let started = core.client.start(load_request(&generated)).await;
 

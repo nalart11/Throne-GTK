@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/sagernet/sing-box/include"
 
-	"ThroneGtkCore/internal/boxbox"
+	"github.com/nalart11/Nolurix/core/internal/boxbox"
 )
 
 func Check(content []byte) error {

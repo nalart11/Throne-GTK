@@ -35,12 +35,10 @@ impl Tray {
     pub fn set_connected(&self, name: Option<String>) {
         let tooltip = match name {
             Some(name) => crate::tr_format!(
-                "Throne GTK — подключено: {name}",
-                "Throne GTK — connected: {name}"
+                "Nolurix — подключено: {name}",
+                "Nolurix — connected: {name}"
             ),
-            None => {
-                crate::i18n::tr("Throne GTK — не подключено", "Throne GTK — disconnected").into()
-            }
+            None => crate::i18n::tr("Nolurix — не подключено", "Nolurix — disconnected").into(),
         };
         if let Some(icon) = self.inner.icon.borrow().as_ref() {
             if let Err(e) = icon.set_tooltip(Some(tooltip)) {
@@ -97,8 +95,8 @@ fn build_icon(actions: async_channel::Sender<Action>) -> Result<TrayIcon, String
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip(crate::i18n::tr(
-            "Throne GTK — не подключено",
-            "Throne GTK — disconnected",
+            "Nolurix — не подключено",
+            "Nolurix — disconnected",
         ))
         .with_icon(template_icon()?)
         .with_icon_as_template(true)
@@ -112,10 +110,10 @@ fn build_icon(actions: async_channel::Sender<Action>) -> Result<TrayIcon, String
 fn template_icon() -> Result<Icon, String> {
     const SIZE: u32 = 36;
     // Reproduce the asset from the canonical symbolic logo by running
-    // png="${TMPDIR:-/tmp}/throne-tray.png"
-    // rsvg-convert -w 36 -h 36 resources/icons/dev.nalart.ThroneGtk-symbolic.svg -o "$png"
-    // swift crates/app/src/generate_tray_icon.swift "$png" crates/app/src/throne_tray_icon.rgba
-    const RGBA: &[u8; SIZE as usize * SIZE as usize * 4] = include_bytes!("throne_tray_icon.rgba");
+    // png="${TMPDIR:-/tmp}/nolurix-tray.png"
+    // rsvg-convert -w 36 -h 36 resources/icons/dev.nalart.Nolurix-symbolic.svg -o "$png"
+    // swift crates/app/src/generate_tray_icon.swift "$png" crates/app/src/nolurix_tray_icon.rgba
+    const RGBA: &[u8; SIZE as usize * SIZE as usize * 4] = include_bytes!("nolurix_tray_icon.rgba");
     Icon::from_rgba(RGBA.to_vec(), SIZE, SIZE).map_err(|e| e.to_string())
 }
 
@@ -123,7 +121,7 @@ fn template_icon() -> Result<Icon, String> {
 mod tests {
     #[test]
     fn template_asset_is_36px_rgba_with_template_alpha() {
-        const RGBA: &[u8; 36 * 36 * 4] = include_bytes!("throne_tray_icon.rgba");
+        const RGBA: &[u8; 36 * 36 * 4] = include_bytes!("nolurix_tray_icon.rgba");
         let alpha = RGBA.chunks_exact(4).map(|pixel| pixel[3]);
         let mut any_visible = false;
         let mut any_transparent = false;

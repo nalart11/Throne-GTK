@@ -4,23 +4,23 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/build" "$work/dist"
-for binary in throne-gtk throne-gtk-core; do
+for binary in nolurix nolurix-core; do
     printf '#!/bin/sh\nexit 99\n' > "$work/build/$binary"
     chmod 755 "$work/build/$binary"
 done
 printf 'fixture\n' > "$work/build/libcronet.so"
-export THRONE_VERSION=0.2.0 THRONE_BUILD_DIR="$work/build" THRONE_PACKAGE_OUT="$work/dist"
+export NOLURIX_VERSION=0.2.0 NOLURIX_BUILD_DIR="$work/build" NOLURIX_PACKAGE_OUT="$work/dist"
 bash "$root/scripts/package-linux.sh"
-python3 - "$work/dist/throne-gtk-0.2.0-linux-x86_64.tar.gz" <<'PY'
+python3 - "$work/dist/nolurix-0.2.0-linux-x86_64.tar.gz" <<'PY'
 import sys, tarfile
-prefix = 'throne-gtk-0.2.0-linux-x86_64/'
+prefix = 'nolurix-0.2.0-linux-x86_64/'
 expected = {
-    'lib/throne-gtk/throne-gtk': 0o755,
-    'lib/throne-gtk/throne-gtk-core': 0o755,
-    'lib/throne-gtk/libcronet.so': 0o644,
-    'share/icons/hicolor/scalable/apps/dev.nalart.ThroneGtk.svg': 0o644,
-    'share/icons/hicolor/symbolic/apps/dev.nalart.ThroneGtk-symbolic.svg': 0o644,
-    'share/applications/dev.nalart.ThroneGtk.desktop.in': 0o644,
+    'lib/nolurix/nolurix': 0o755,
+    'lib/nolurix/nolurix-core': 0o755,
+    'lib/nolurix/libcronet.so': 0o644,
+    'share/icons/hicolor/scalable/apps/dev.nalart.Nolurix.svg': 0o644,
+    'share/icons/hicolor/symbolic/apps/dev.nalart.Nolurix-symbolic.svg': 0o644,
+    'share/applications/dev.nalart.Nolurix.desktop.in': 0o644,
 }
 with tarfile.open(sys.argv[1]) as archive:
     files = {}
@@ -31,11 +31,12 @@ with tarfile.open(sys.argv[1]) as archive:
         if member.isfile():
             files[member.name[len(prefix):]] = member.mode
     assert files == expected, files
-    assert b'@EXEC@' in archive.extractfile(prefix + 'share/applications/dev.nalart.ThroneGtk.desktop.in').read()
+    assert b'@EXEC@' in archive.extractfile(prefix + 'share/applications/dev.nalart.Nolurix.desktop.in').read()
 PY
-if THRONE_VERSION=../escape bash "$root/scripts/package-linux.sh"; then exit 1; fi
+if NOLURIX_VERSION=../escape bash "$root/scripts/package-linux.sh"; then exit 1; fi
 rm "$work/build/libcronet.so"
 if bash "$root/scripts/package-linux.sh"; then exit 1; fi
-ln -s throne-gtk "$work/build/libcronet.so"
+ln -s nolurix "$work/build/libcronet.so"
 if bash "$root/scripts/package-linux.sh"; then exit 1; fi
+python3 "$root/scripts/test-source-install.py"
 echo 'Linux packaging fixtures passed'

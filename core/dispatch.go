@@ -1,9 +1,9 @@
 package main
 
 import (
-	"ThroneGtkCore/gen"
 	"context"
 	"fmt"
+	"github.com/nalart11/Nolurix/core/gen"
 	"log"
 	"net"
 	runtimeDebug "runtime/debug"

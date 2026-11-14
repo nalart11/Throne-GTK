@@ -1,8 +1,8 @@
 package main
 
 import (
-	"ThroneGtkCore/internal/boxdns"
 	"encoding/json"
+	"github.com/nalart11/Nolurix/core/internal/boxdns"
 	"runtime"
 	"sync/atomic"
 

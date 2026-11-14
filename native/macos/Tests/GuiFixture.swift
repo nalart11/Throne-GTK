@@ -2,7 +2,7 @@ import Foundation
 
 private func response(_ pointer: UnsafeMutablePointer<CChar>?) throws -> Any {
     guard let pointer else { throw NSError(domain: "GuiFixture", code: 1) }
-    defer { throne_macos_string_free(pointer) }
+    defer { nolurix_macos_string_free(pointer) }
     let data = Data(String(cString: pointer).utf8)
     let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
     guard root["ok"] as? Bool == true else {
@@ -12,17 +12,17 @@ private func response(_ pointer: UnsafeMutablePointer<CChar>?) throws -> Any {
 }
 
 private func seedGuiFixture(dataDirectory: String) throws {
-    let options: [String: Any] = ["data_dir": dataDirectory, "core_path": "/nonexistent-throne-core"]
+    let options: [String: Any] = ["data_dir": dataDirectory, "core_path": "/nonexistent-nolurix-core"]
     let optionsData = try JSONSerialization.data(withJSONObject: options)
     let optionsText = String(decoding: optionsData, as: UTF8.self)
-    let rawHandle = try optionsText.withCString { try response(throne_macos_open($0)) }
+    let rawHandle = try optionsText.withCString { try response(nolurix_macos_open($0)) }
     guard let handle = (rawHandle as? NSNumber)?.uint64Value else { throw NSError(domain: "GuiFixture", code: 3) }
-    defer { _ = try? response(throne_macos_close(handle)) }
+    defer { _ = try? response(nolurix_macos_close(handle)) }
 
     func send(_ fields: [String: Any]) throws -> Any {
         let data = try JSONSerialization.data(withJSONObject: fields)
         let text = String(decoding: data, as: UTF8.self)
-        return try text.withCString { try response(throne_macos_request(handle, $0)) }
+        return try text.withCString { try response(nolurix_macos_request(handle, $0)) }
     }
 
     _ = try send(["op": "settings_patch", "patch": ["language": "ru", "connect_last_on_start": false]])

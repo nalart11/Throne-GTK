@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"ThroneGtkCore/internal/boxbox"
+	"github.com/nalart11/Nolurix/core/internal/boxbox"
 
 	"github.com/sagernet/sing-box/adapter"
 )

@@ -80,7 +80,7 @@ static int throne_release_info(CFDictionaryRef info) {
 }
 
 static int throne_local_development_install(void) {
-    const char *marker = "/Library/Application Support/Throne GTK/.throne-gtk-manual";
+    const char *marker = "/Library/Application Support/Nolurix/.nolurix-manual";
     struct stat st;
     // Callers have already validated the protected installation ancestors.
     return lstat(marker, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == 0 &&

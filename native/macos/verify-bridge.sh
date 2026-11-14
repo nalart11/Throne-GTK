@@ -14,9 +14,9 @@ fi
 read -ra NATIVE_LIBS <<< "$LIBS"
 swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -target "$(uname -m)-apple-macosx${MACOSX_DEPLOYMENT_TARGET}" \
-  -import-objc-header "$ROOT/crates/macos-bridge/include/throne_macos.h" \
+  -import-objc-header "$ROOT/crates/macos-bridge/include/nolurix_macos.h" \
   "$ROOT/native/macos/Verification/BridgeSmoke.swift" \
-  "$CARGO_TARGET_DIR/release/libthrone_macos_bridge.a" \
+  "$CARGO_TARGET_DIR/release/libnolurix_macos_bridge.a" \
   -framework AppKit -framework SwiftUI -framework Security -framework SystemConfiguration \
   "${NATIVE_LIBS[@]}" -o "$OUT/bridge-smoke"
 "$OUT/bridge-smoke"

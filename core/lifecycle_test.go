@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"ThroneGtkCore/gen"
+	"github.com/nalart11/Nolurix/core/gen"
 )
 
 func minimalStartRequest() *gen.LoadConfigReq {

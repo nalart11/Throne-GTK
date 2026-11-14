@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="native/macos/Resources/AppIcon.png" width="112" alt="Throne GTK logo">
+<img src="native/macos/Resources/AppIcon.png" width="112" alt="Nolurix logo">
 
-# Throne GTK
+# Nolurix
 
-**A desktop proxy client with a native feel.**
+**Your network. Your rules.**
+
+Nolurix is an independent cross-platform proxy and VPN client powered by sing-box and Xray.
 
 SwiftUI & AppKit on macOS. GTK4 & libadwaita on Linux and Windows. Powered by sing-box and Xray.
 
@@ -13,27 +15,29 @@ SwiftUI & AppKit on macOS. GTK4 & libadwaita on Linux and Windows. Powered by si
 
 **English** · [Русский](README.ru.md)
 
-[Download](https://github.com/nalart11/Throne-GTK/releases) · [Build from source](#build-from-source) · [Report an issue](https://github.com/nalart11/Throne-GTK/issues)
+[Download](https://github.com/nalart11/Nolurix/releases) · [Build from source](#build-from-source) · [Report an issue](https://github.com/nalart11/Nolurix/issues)
 
 </div>
 
 ---
 
-Throne GTK is an independent desktop project originally based on [Throne](https://github.com/throneproj/Throne). It has its own Rust application layer and native interfaces, with networking powered by a Go core built on sing-box and Xray. The project develops its own interface, configuration, storage, and desktop integration rather than retaining the original Qt application.
+Nolurix is an independent desktop project originally based on [Throne](https://github.com/throneproj/Throne). It has its own Rust application layer and native interfaces, with networking powered by a Go core built on sing-box and Xray. The project develops its own interface, configuration, storage, and desktop integration rather than retaining the original Qt application.
 
 Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscriptions, choose servers, configure DNS-over-HTTPS or DNS-over-TLS, and keep routing rules in one application.
 
 ## Interface
 
+Screenshots below are unchanged pre-rebrand captures of Throne GTK, not current Nolurix captures.
+
 ### Linux · GTK4 / libadwaita
 
 **Profiles and groups**
 
-![Throne GTK Linux profiles interface with demonstration data](docs/screenshots/linux-profiles.png)
+![Nolurix Linux profiles interface with demonstration data](docs/screenshots/linux-profiles.png)
 
 **Routing rules**
 
-![Throne GTK Linux routing rules with demonstration data](docs/screenshots/linux-routing.png)
+![Nolurix Linux routing rules with demonstration data](docs/screenshots/linux-routing.png)
 
 *Captured on Linux with the desktop's GTK styling. Fonts, icons, and colors may vary with your theme.*
 
@@ -41,11 +45,11 @@ Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscri
 
 **Profiles and groups**
 
-![Throne GTK macOS profiles interface with demonstration data](docs/screenshots/macos-profiles.png)
+![Nolurix macOS profiles interface with demonstration data](docs/screenshots/macos-profiles.png)
 
 **Routing rule editor**
 
-![Throne GTK macOS routing rule editor with demonstration data](docs/screenshots/macos-routing-rule.png)
+![Nolurix macOS routing rule editor with demonstration data](docs/screenshots/macos-routing-rule.png)
 
 *All screenshots use demonstration data; no live VPN connection is shown. macOS has a separate native interface; Linux and Windows use GTK.*
 
@@ -69,25 +73,33 @@ Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscri
 | Linux | GTK4 / libadwaita | VPN requires TUN capabilities. Tray support depends on a StatusNotifierItem host. |
 | Windows | GTK4 / libadwaita | Current source-build instructions use MSYS2 MinGW64. VPN requires administrator privileges; tray support is disabled. |
 
-**This project is under active development.** The published v0.2.1 macOS package requires **Apple Silicon and macOS 15.0+**. Source builds may have a different minimum: packaging uses the higher deployment target of the GUI and core.
+**This project is under active development.** Historical pre-rebrand v0.2.1 macOS packages targeted **Apple Silicon and macOS 15.0+**; this is not a Nolurix validation result. Source builds may have a different minimum: packaging uses the higher deployment target of the GUI and core. Check current release metadata; no platform pass is implied by this rebrand.
 
 ## Installation
 
 ### Install from a release (Linux / macOS)
 
+**Temporary release gap:** the latest remote release is currently v0.2.1 with
+historical Throne GTK assets only; no Nolurix release has been published yet.
+The unpinned commands below intentionally refuse those old asset names and
+currently do not install successfully. Build from source for Nolurix.
+Explicit `--version 0.2.1` enables a historical fallback only when the Nolurix
+asset returns HTTP 404; it installs **Throne GTK with its old identity**, not
+Nolurix. Other download failures do not trigger fallback.
+
 Download the installer, review it, then run it as your normal user, **not with `sudo`**:
 
 ```sh
 curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://raw.githubusercontent.com/nalart11/Throne-GTK/main/scripts/install.sh \
-  --output install-throne.sh
-# Review install-throne.sh before running it.
-bash install-throne.sh                        # Linux
+  https://raw.githubusercontent.com/nalart11/Nolurix/main/scripts/install.sh \
+  --output install-nolurix.sh
+# Review install-nolurix.sh before running it.
+bash install-nolurix.sh                        # Linux
 # macOS: explicitly accept the testing, unsigned/unnotarized PKG:
-bash install-throne.sh --allow-unsigned-macos
+bash install-nolurix.sh --allow-unsigned-macos
 ```
 
-The default is the latest stable release; use `--version 0.2.1` to pin a version, `--prefix "$HOME/.local"` to change the Linux destination, or `--help` for options. Close Throne GTK before installing or updating. The script checks the asset against the release's `SHA256SUMS` before installation. This detects corruption, not compromise of the release account; it is not a publisher signature. It never builds from source, disables Gatekeeper, or starts the app.
+The default is the latest stable release; use `--version 0.2.1` to pin a version, `--prefix "$HOME/.local"` to change the Linux destination, or `--help` for options. Close Nolurix before installing or updating. The script checks the asset against the release's `SHA256SUMS` before installation. This detects corruption, not compromise of the release account; it is not a publisher signature. It never builds from source, disables Gatekeeper, or starts the app.
 
 Linux releases currently support **x86_64, glibc ≥ 2.39, GTK ≥ 4.12 and libadwaita ≥ 1.5**. The installer needs `curl` and Python 3, installs under `~/.local` without administrator access, and does **not** grant VPN capabilities automatically. Keep `~/.local/bin` on your `PATH`. macOS releases currently support **Apple Silicon, macOS 15.0+**; the PKG installs the VPN helper and requests administrator authorization only for the system installer. `--yes` does not replace `--allow-unsigned-macos`.
 
@@ -95,17 +107,21 @@ From an existing checkout, use `bash scripts/install.sh` with the same options i
 
 ### macOS
 
-See [Releases](https://github.com/nalart11/Throne-GTK/releases) for available packages. The v0.2.1 macOS assets are **testing packages**, not Developer ID–signed/notarized public distributions. Only install a package whose source you trust; do not disable system-wide security protections.
+See [Releases](https://github.com/nalart11/Nolurix/releases) for available packages. Historical pre-rebrand v0.2.1 macOS assets were **testing packages**, not Developer ID–signed/notarized public distributions. Only install a package whose source you trust; do not disable system-wide security protections.
 
 For a build from this checkout:
 
 ```sh
-just dmg          # dist/throne-gtk-macos.dmg
+just dmg          # dist/nolurix-macos.dmg
 # Or, for a trusted personal installation with a system helper:
-just installer    # dist/throne-gtk-local-installer.pkg
+just installer    # dist/nolurix-local-installer.pkg
 ```
 
-The DMG contains `Throne GTK.app` for local proxy use. VPN requires a PKG installation of the complete bundle into the protected `/Library/Application Support/Throne GTK/Throne GTK.app`; `/Applications` contains only a link. Copying the DMG app into `/Applications` does not grant VPN privileges. Do not weaken global directory permissions to bypass the checks. Close the application before updating.
+The DMG contains `Nolurix.app` for local proxy use. VPN requires a PKG installation of the complete bundle into the protected `/Library/Application Support/Nolurix/Nolurix.app`; `/Applications` contains only a link. Copying the DMG app into `/Applications` does not grant VPN privileges. Do not weaken global directory permissions to bypass the checks. Close the application before updating.
+
+**Upgrading from Throne GTK:** first follow the [migration guide](docs/MIGRATION.md).
+The old helper and pending DNS journals must be safely retired; the new installer
+refuses legacy installation artifacts. Never run either GUI as root.
 
 The local installer requests administrator authorization and registers a manual launchd helper. It is for a trusted personal Mac, not notarized public distribution. For a signed PKG using SMAppService, use `just installer-release` with `CODESIGN_IDENTITY`, `INSTALLER_SIGN_IDENTITY`, and `NOTARY_PROFILE`. The existence of these commands does not establish that signing or notarization succeeded. Installation, migration, removal, and outstanding native checks are described in the [macOS handoff](docs/MACOS_HANDOFF.md) and [helper policy](core/helpertrust/README.md).
 
@@ -121,7 +137,7 @@ For VPN after a release installation, optionally grant privileges to the **insta
 
 ```sh
 sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep \
-  "$HOME/.local/lib/throne-gtk/throne-gtk-core"
+  "$HOME/.local/lib/nolurix/nolurix-core"
 ```
 
 Adjust the path for a custom prefix and repeat after each update. Proxy mode needs no capabilities. These privileges allow the core to alter networking; the installer never grants them itself.
@@ -130,10 +146,16 @@ For installation from source instead of a release:
 
 ```sh
 just install
-just grant-tun    # Only needed for VPN; grants capabilities to the core
+# If installed-core capabilities need reapplying later:
+just grant-installed-tun
 ```
 
-The default installation prefix is `~/.local`. Repeat `just grant-tun` after reinstalling the core. Proxy mode does not need these capabilities. To remove the application, run `just uninstall`.
+The default installation prefix is `~/.local`. Unlike the release installer,
+`just install` itself prompts through `sudo` and grants VPN capabilities to the
+installed core. After replacing that core separately, use `just grant-installed-tun`
+to reapply them (`PREFIX` selects a custom installation prefix). `just grant-tun`
+targets the development copy in `build/`, not the installed core. Proxy mode does
+not need these capabilities. To remove the application, run `just uninstall`.
 
 ### Windows
 
@@ -144,12 +166,12 @@ Build using the MSYS2 instructions below. The GTK/libadwaita DLLs must be availa
 Common prerequisites: **Rust, Go, Protocol Buffers (`protoc`), and [`just`](https://github.com/casey/just)**. Linux/Windows additionally need **GTK ≥ 4.12** and **libadwaita ≥ 1.5**. macOS uses the Swift/Xcode toolchain instead of GTK.
 
 ```sh
-git clone https://github.com/nalart11/Throne-GTK.git
-cd Throne-GTK
+git clone https://github.com/nalart11/Nolurix.git
+cd Nolurix
 RELEASE=1 just build
 ```
 
-The build places `throne-gtk` and `throne-gtk-core` in `build/` (`.exe` on Windows). Keep them together and retain their names: the core verifies the GUI's identity and location. The build tasks also handle Cronet where available for Naive support.
+The build places `nolurix` and `nolurix-core` in `build/` (`.exe` on Windows). Keep them together and retain their names: the core verifies the GUI's identity and location. The build tasks also handle Cronet where available for Naive support.
 
 The Justfile selects **Go 1.26.0** via `GOTOOLCHAIN` as a compatibility workaround for dependencies that use Go linker internals. Allow Go's toolchain download or install that version explicitly; do not assume a newer Go version is interchangeable.
 
@@ -180,7 +202,7 @@ For Developer ID signing and notarization, configure your signing identity and a
 
 ```sh
 CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-NOTARY_PROFILE=throne-notary just dmg
+NOTARY_PROFILE=nolurix-notary just dmg
 ```
 
 Without these credentials, local packaging uses ad-hoc signing. See the [native macOS guide](native/macos/README.md) for isolated build commands and limitations.
@@ -228,7 +250,7 @@ Saved connection settings apply on the next connection. The interface supports E
 
 ### DNS in VPN mode
 
-macOS may show `172.19.0.2` as its DNS server while connected. This is Throne GTK's **internal tunnel resolver**, not the external upstream. With the built-in DNS service enabled, set **Settings → DNS → Remote resolver** to an upstream such as `https://1.1.1.1/dns-query` for Cloudflare DoH through the proxy. The direct resolver is a separate path; changing it is not the same as changing the proxy resolver. Save and reconnect to apply changes.
+macOS may show `172.19.0.2` as its DNS server while connected. This is Nolurix's **internal tunnel resolver**, not the external upstream. With the built-in DNS service enabled, set **Settings → DNS → Remote resolver** to an upstream such as `https://1.1.1.1/dns-query` for Cloudflare DoH through the proxy. The direct resolver is a separate path; changing it is not the same as changing the proxy resolver. Save and reconnect to apply changes.
 
 ### Importing from Throne
 
@@ -246,13 +268,29 @@ The importer leaves the source database unchanged. Only supported routing condit
 
 ## Data and privacy
 
+### Automatic migration from the former GTK application
+
+Before opening its normal store, Nolurix automatically migrates the former
+`throne-gtk/throne-gtk.db` to `nolurix/nolurix.db` in the platform configuration
+location below. It uses SQLite backup so committed WAL data is included.
+Existing Nolurix data always wins: there is no merge or overwrite. The source
+is never deleted; staging/publication is crash-safe and a later launch can retry.
+Close the old application first and keep a private backup.
+
+This is **not** the manual import of the original upstream Throne database
+described above; that remains a separate, explicit operation.
+Only default storage is eligible; an existing Nolurix directory, even empty,
+wins. This describes the main SQLite database, not the BoltDB core `cache.db`;
+no cache transfer is promised. See the [migration policy](docs/MIGRATION.md)
+and [current rebranding evidence](docs/REBRANDING_VERIFICATION.md).
+
 | Platform | Profiles, settings, and core cache |
 | --- | --- |
-| Linux | `~/.config/throne-gtk/` |
-| macOS | `~/Library/Application Support/throne-gtk/` |
-| Windows | `%APPDATA%\throne-gtk\` |
+| Linux | `~/.config/nolurix/` |
+| macOS | `~/Library/Application Support/nolurix/` |
+| Windows | `%APPDATA%\nolurix\` |
 
-The main database is `throne-gtk.db`; the core cache is `cache.db`. Do not open the same database in multiple app instances. Databases and exported profiles can contain credentials: keep backups private and redact secrets from bug reports, logs, and screenshots.
+The main database is `nolurix.db`; the core cache is `cache.db`. Do not open the same database in multiple app instances. Databases and exported profiles can contain credentials: keep backups private and redact secrets from bug reports, logs, and screenshots.
 
 ## Known limitations
 
@@ -277,10 +315,10 @@ The GUI and core communicate over a Unix socket or Windows named pipe. macOS reu
 
 ## Contributing
 
-Bug reports, focused fixes, platform testing, and translation improvements are welcome. [Open an issue](https://github.com/nalart11/Throne-GTK/issues) with your OS, app version or commit, reproduction steps, and sanitized logs. For UI changes, include a screenshot without personal profiles or credentials. Mention which checks you ran and which platforms you could not test.
+Bug reports, focused fixes, platform testing, and translation improvements are welcome. [Open an issue](https://github.com/nalart11/Nolurix/issues) with your OS, app version or commit, reproduction steps, and sanitized logs. For UI changes, include a screenshot without personal profiles or credentials. Mention which checks you ran and which platforms you could not test.
 
 ## Credits and license
 
-Originally based on [Throne](https://github.com/throneproj/Throne). Thanks to the projects that make Throne GTK possible: [sing-box](https://github.com/SagerNet/sing-box), [Xray-core](https://github.com/XTLS/Xray-core), [GTK](https://www.gtk.org/), [libadwaita](https://gnome.pages.gitlab.gnome.org/libadwaita/), and Apple's SwiftUI/AppKit.
+Originally based on [Throne](https://github.com/throneproj/Throne). Thanks to the projects that make Nolurix possible: [sing-box](https://github.com/SagerNet/sing-box), [Xray-core](https://github.com/XTLS/Xray-core), [GTK](https://www.gtk.org/), [libadwaita](https://gnome.pages.gitlab.gnome.org/libadwaita/), and Apple's SwiftUI/AppKit.
 
 Licensed under **GPL-3.0-or-later**. See [LICENSE](LICENSE). Dependencies retain their respective licenses.

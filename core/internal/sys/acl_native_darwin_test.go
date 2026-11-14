@@ -49,7 +49,7 @@ int main(int argc,char **argv) {
  if (argc!=4) return 2;
  const char *path=argv[1], *kind=argv[2], *setter=argv[3];
  if (!strcmp(kind,"invalid")) {
-  if (throne_dns_safe_acl(-1)==0 || test_helper_acl(path)==0 || test_installer_acl(path)==0) return 1;
+  if (nolurix_dns_safe_acl(-1)==0 || test_helper_acl(path)==0 || test_installer_acl(path)==0) return 1;
   return 0;
  }
  int fd=open(path,O_RDWR|O_NOFOLLOW);
@@ -72,7 +72,7 @@ int main(int argc,char **argv) {
   if (result!=0) return fixture_error();
  }
  int expected=!strcmp(kind,"write") ? -1 : 0;
- int a=throne_dns_safe_acl(fd),b=test_helper_acl(path),c=test_installer_acl(path);
+ int a=nolurix_dns_safe_acl(fd),b=test_helper_acl(path),c=test_installer_acl(path);
  close(fd);
  if ((a==0)!=(expected==0) || (b==0)!=(expected==0) || (c==0)!=(expected==0)) {
   fprintf(stderr,"kind=%s expected=%d fd=%d helper=%d installer=%d\n",kind,expected,a,b,c); return 1;

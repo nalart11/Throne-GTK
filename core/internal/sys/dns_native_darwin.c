@@ -11,7 +11,7 @@
 #include "../../helpertrust/acl_policy.h"
 #include "acl_presence.h"
 
-struct throne_dns_tx {
+struct nolurix_dns_tx {
  SCPreferencesRef prefs;
  SCNetworkServiceRef service;
  char *service_id, *location_id;
@@ -24,30 +24,30 @@ static char *string_copy(CFStringRef value) {
  if (result && !CFStringGetCString(value,result,length,kCFStringEncodingUTF8)) { free(result); return NULL; }
  return result;
 }
-void throne_dns_end(throne_dns_tx *tx) {
+void nolurix_dns_end(nolurix_dns_tx *tx) {
  if (!tx) return;
  if (tx->service) CFRelease(tx->service);
  if (tx->prefs) { SCPreferencesUnlock(tx->prefs); CFRelease(tx->prefs); }
  free(tx->service_id); free(tx->location_id); free(tx);
 }
-throne_dns_tx *throne_dns_begin(const char *interface, const char *service, const char *location, int *status) {
+nolurix_dns_tx *nolurix_dns_begin(const char *interface, const char *service, const char *location, int *status) {
  *status=0;
- throne_dns_tx *tx=calloc(1,sizeof(*tx));
+ nolurix_dns_tx *tx=calloc(1,sizeof(*tx));
  if (!tx) { *status=-1; return NULL; }
- tx->prefs=SCPreferencesCreate(NULL,CFSTR("Throne DNS lease"),NULL);
- if (!tx->prefs) { *status=SCError(); throne_dns_end(tx); return NULL; }
+ tx->prefs=SCPreferencesCreate(NULL,CFSTR("Nolurix DNS lease"),NULL);
+ if (!tx->prefs) { *status=SCError(); nolurix_dns_end(tx); return NULL; }
  // Never wait behind another preferences writer while holding the DNS lease.
  if (!SCPreferencesLock(tx->prefs,0)) {
   *status=SCError();
-  if (*status==kSCStatusPrefsBusy) *status=THRONE_DNS_PREFS_BUSY;
-  CFRelease(tx->prefs); tx->prefs=NULL; throne_dns_end(tx); return NULL;
+  if (*status==kSCStatusPrefsBusy) *status=NOLURIX_DNS_PREFS_BUSY;
+  CFRelease(tx->prefs); tx->prefs=NULL; nolurix_dns_end(tx); return NULL;
  }
  SCPreferencesSynchronize(tx->prefs);
  SCNetworkSetRef set=SCNetworkSetCopyCurrent(tx->prefs);
- if (!set) { *status=10001; throne_dns_end(tx); return NULL; }
+ if (!set) { *status=10001; nolurix_dns_end(tx); return NULL; }
  tx->location_id=string_copy(SCNetworkSetGetSetID(set));
  if (!tx->location_id || (*location && strcmp(location,tx->location_id)!=0)) {
-  *status=10001; CFRelease(set); throne_dns_end(tx); return NULL;
+  *status=10001; CFRelease(set); nolurix_dns_end(tx); return NULL;
  }
  CFArrayRef services=SCNetworkSetCopyServices(set); CFRelease(set);
  if (services) {
@@ -61,18 +61,18 @@ throne_dns_tx *throne_dns_begin(const char *interface, const char *service, cons
    // Recovery also checks interface identity, not just a potentially reused ID.
    if (matches && *interface && (!name || strcmp(interface,name)!=0)) matches=0;
    if (matches) {
-    if (tx->service) { *status=10002; free(id); free(name); CFRelease(services); throne_dns_end(tx); return NULL; }
+    if (tx->service) { *status=10002; free(id); free(name); CFRelease(services); nolurix_dns_end(tx); return NULL; }
     tx->service=(SCNetworkServiceRef)CFRetain(candidate); tx->service_id=id; id=NULL;
    }
    free(id); free(name);
   }
   CFRelease(services);
  }
- if (!tx->service) { *status=10002; throne_dns_end(tx); return NULL; }
+ if (!tx->service) { *status=10002; nolurix_dns_end(tx); return NULL; }
  return tx;
 }
-const char *throne_dns_service(throne_dns_tx *tx) { return tx->service_id; }
-const char *throne_dns_location(throne_dns_tx *tx) { return tx->location_id; }
+const char *nolurix_dns_service(nolurix_dns_tx *tx) { return tx->service_id; }
+const char *nolurix_dns_location(nolurix_dns_tx *tx) { return tx->location_id; }
 
 static CFPropertyListRef decode(const unsigned char *bytes,int length) {
  CFDataRef data=CFDataCreate(NULL,bytes,length);
@@ -82,7 +82,7 @@ static CFPropertyListRef decode(const unsigned char *bytes,int length) {
 }
 // Enumerate protocols rather than treating any failed CopyProtocol call as an
 // absent protocol: an API read error must never become an invented snapshot.
-static int copy_dns_protocol(throne_dns_tx *tx,SCNetworkProtocolRef *result,int *status) {
+static int copy_dns_protocol(nolurix_dns_tx *tx,SCNetworkProtocolRef *result,int *status) {
  *result=NULL;
  CFArrayRef protocols=SCNetworkServiceCopyProtocols(tx->service);
  if (!protocols) { *status=SCError(); return 0; }
@@ -94,7 +94,7 @@ static int copy_dns_protocol(throne_dns_tx *tx,SCNetworkProtocolRef *result,int 
  }
  CFRelease(protocols); return 1;
 }
-unsigned char *throne_dns_snapshot(throne_dns_tx *tx,const char *address,int *length,int *status) {
+unsigned char *nolurix_dns_snapshot(nolurix_dns_tx *tx,const char *address,int *length,int *status) {
  *status=0; *length=0;
  SCNetworkProtocolRef protocol=NULL;
  if (!copy_dns_protocol(tx,&protocol,status)) return NULL;
@@ -119,12 +119,12 @@ unsigned char *throne_dns_snapshot(throne_dns_tx *tx,const char *address,int *le
  if (result) memcpy(result,CFDataGetBytePtr(encoded),*length); else *status=-1;
  CFRelease(encoded); return result;
 }
-int throne_dns_equal(const unsigned char *a,int na,const unsigned char *b,int nb) {
+int nolurix_dns_equal(const unsigned char *a,int na,const unsigned char *b,int nb) {
  CFPropertyListRef av=decode(a,na),bv=decode(b,nb);
  int equal=av && bv && CFEqual(av,bv);
  if (av) CFRelease(av); if (bv) CFRelease(bv); return equal;
 }
-int throne_dns_set(throne_dns_tx *tx,const unsigned char *data,int length,int *status) {
+int nolurix_dns_set(nolurix_dns_tx *tx,const unsigned char *data,int length,int *status) {
  *status=0;
  CFPropertyListRef value=decode(data,length);
  if (!value || CFGetTypeID(value)!=CFDictionaryGetTypeID()) { if (value) CFRelease(value); *status=10003; return 0; }
@@ -151,17 +151,17 @@ int throne_dns_set(throne_dns_tx *tx,const unsigned char *data,int length,int *s
  if (!ok) *status=SCError();
  if (protocol) CFRelease(protocol); CFRelease(value); return ok;
 }
-int throne_dns_commit(throne_dns_tx *tx,int *status) {
+int nolurix_dns_commit(nolurix_dns_tx *tx,int *status) {
  int ok=SCPreferencesCommitChanges(tx->prefs); *status=ok ? 0 : SCError(); return ok;
 }
-int throne_dns_apply(throne_dns_tx *tx,int *status) {
+int nolurix_dns_apply(nolurix_dns_tx *tx,int *status) {
  int ok=SCPreferencesApplyChanges(tx->prefs); *status=ok ? 0 : SCError(); return ok;
 }
 
 // Inspect the already-open inode, never a path that can be substituted. Match
 // helpertrust's policy: deny/read-only ACEs are safe; write grants, unknown
 // ACEs, unreadable ACLs and unreadable permission bits all fail closed.
-int throne_dns_safe_acl(int fd) {
+int nolurix_dns_safe_acl(int fd) {
  acl_t acl=NULL;
  int presence=throne_acl_read(fd,NULL,&acl);
  if (presence<=0) return presence;

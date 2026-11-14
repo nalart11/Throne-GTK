@@ -18,8 +18,8 @@ fi
 read -ra NATIVE_LIBS <<< "$LIBS"
 swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library "$ROOT"/native/macos/Sources/*.swift \
   -target "$(uname -m)-apple-macosx${MACOSX_DEPLOYMENT_TARGET}" \
-  -import-objc-header "$ROOT/crates/macos-bridge/include/throne_macos.h" \
-  "$CARGO_TARGET_DIR/release/libthrone_macos_bridge.a" \
+  -import-objc-header "$ROOT/crates/macos-bridge/include/nolurix_macos.h" \
+  "$CARGO_TARGET_DIR/release/libnolurix_macos_bridge.a" \
   -framework AppKit -framework SwiftUI -framework Security -framework SystemConfiguration \
-  "${NATIVE_LIBS[@]}" -o "$OUT/throne-gtk" 2>&1 | tee "$OUT/swift-build.log"
-echo "Built $OUT/throne-gtk (not launched)"
+  "${NATIVE_LIBS[@]}" -o "$OUT/nolurix" 2>&1 | tee "$OUT/swift-build.log"
+echo "Built $OUT/nolurix (not launched)"

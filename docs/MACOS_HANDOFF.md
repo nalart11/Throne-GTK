@@ -1,4 +1,4 @@
-# macOS testing handoff (`dev`)
+# macOS testing handoff (`main`)
 
 The branch is a stabilization handoff, **not a completed macOS release**.
 Windows work remains gated. Preserve GTK4/libadwaita, Rust/Go, profiles and Linux.
@@ -33,8 +33,8 @@ Hosted CI intentionally does not install a privileged helper or change networkin
 The complete finalized bundle, including Frameworks, is installed at:
 
 ```text
-/Library/Application Support/Throne GTK/Throne GTK.app
-/Applications/Throne GTK.app -> the protected bundle above
+/Library/Application Support/Nolurix/Nolurix.app
+/Applications/Nolurix.app -> the protected bundle above
 ```
 
 The Applications link is not trusted. Do not chmod shared directories or remove
@@ -53,25 +53,9 @@ subtree is normalized. Test launch via Finder and the convenience link, actual
 
 ## Upgrade, migration and removal
 
-Quit the GUI and disconnect before replacing files. Never run the GUI as root.
-For an SM-managed installation, first run its executable **as the owning user**:
-
-```sh
-"/Library/Application Support/Throne GTK/Throne GTK.app/Contents/MacOS/throne-gtk" --unregister-helper
-```
-
-Do not continue after an error/timeout. Then, with explicit administrator consent,
-run the installed protected `uninstall.sh --sm-unregistered` and install the new
-PKG. Manual-mode updates stop the verified owned launchd job before replacement;
-manual removal uses the installed `uninstall.sh` without the SM flag. Both modes
-preserve user profiles/preferences and refuse to delete foreign Applications items.
-
-Legacy `/Applications` installations require unregistering in that bundle's user
-context before moving the verified old bundle aside. If the old executable lacks
-the unregister command, do not pretend bootout unregisters SMAppService: use a
-user-context native SMAppService migration tool or establish native removal with
-Apple tooling first. Installer refusal is intentional until ownership/registration
-is clear. Switching manual/release registration modes requires explicit removal.
+Follow [the migration guide](MIGRATION.md) before installing Nolurix over a
+former Throne GTK installation. Old helper retirement is explicit and must use
+the verified old installation, never the new executable or a root GUI.
 
 ## Native gates still open
 

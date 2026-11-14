@@ -1,8 +1,8 @@
-//! Transport to the ThroneGtkCore core.
+//! Transport to the Nolurix core.
 //!
 //! The core does not create the endpoint itself: it connects to ours through a
 //! Unix socket or Windows named pipe, checking that the peer is its own parent
-//! and that the parent's binary is nearby and named `throne-gtk`.
+//! and that the parent's binary is nearby and named `nolurix`.
 //!
 //! Frames (little-endian):
 //!   request: [u32 req_id][u16 method_len][method][u32 payload_len][payload]
@@ -431,7 +431,7 @@ impl Endpoint {
             let _ = socket_dir;
             Ok(Self {
                 path: PathBuf::from(format!(
-                    r"\\.\pipe\throne-gtk-{}-{}-{}",
+                    r"\\.\pipe\nolurix-{}-{}-{}",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)?
@@ -497,8 +497,8 @@ impl Core {
             unreachable!("privileged helper is only used on macOS");
         } else {
             let mut cmd = Command::new(core_bin);
-            cmd.env("THRONE_CORE_SOCKET", &endpoint)
-                .env("THRONE_CORE_DEBUG", if debug { "1" } else { "0" })
+            cmd.env("NOLURIX_CORE_SOCKET", &endpoint)
+                .env("NOLURIX_CORE_DEBUG", if debug { "1" } else { "0" })
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -545,7 +545,7 @@ impl Core {
                 }
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
-                     `throne-gtk` и лежит рядом с ядром",
+                     `nolurix` и лежит рядом с ядром",
                     endpoint.display()
                 );
             }

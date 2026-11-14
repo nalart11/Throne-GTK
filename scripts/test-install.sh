@@ -57,14 +57,17 @@ while [ "$#" -gt 0 ]; do
  *) url=$1; shift;;
  esac
 done
-if [[ "$url" = */latest ]]; then printf '%s' "${LATEST_URL:-https://github.com/nalart11/Throne-GTK/releases/tag/v0.2.1}"; exit; fi
+if [[ "$url" = */latest ]]; then printf '%s' "${LATEST_URL:-https://github.com/nalart11/Nolurix/releases/tag/v0.2.1}"; exit; fi
 [ "${FAIL_DOWNLOAD:-no}" = no ] || exit 22
+if [ "${MISSING_NEW_ASSET:-no}" = yes ] && [[ "$url" = */nolurix-*.tar.gz ]]; then
+ printf 404; exit 22
+fi
 cp "$FIXTURE/${url##*/}" "$out"
 ''')
-    version='0.2.1'; name='throne-gtk-'+version+'-linux-x86_64'; asset=name+'.tar.gz'
-    paths=['lib/throne-gtk/throne-gtk','lib/throne-gtk/throne-gtk-core','lib/throne-gtk/libcronet.so',
-      'share/icons/hicolor/scalable/apps/dev.nalart.ThroneGtk.svg','share/icons/hicolor/symbolic/apps/dev.nalart.ThroneGtk-symbolic.svg',
-      'share/applications/dev.nalart.ThroneGtk.desktop.in']
+    version='0.2.1'; name='nolurix-'+version+'-linux-x86_64'; asset=name+'.tar.gz'
+    paths=['lib/nolurix/nolurix','lib/nolurix/nolurix-core','lib/nolurix/libcronet.so',
+      'share/icons/hicolor/scalable/apps/dev.nalart.Nolurix.svg','share/icons/hicolor/symbolic/apps/dev.nalart.Nolurix-symbolic.svg',
+      'share/applications/dev.nalart.Nolurix.desktop.in']
     def archive(extra=None):
         with tarfile.open(fixture/asset,'w:gz') as tar:
             for path in paths:
@@ -86,22 +89,32 @@ cp "$FIXTURE/${url##*/}" "$out"
         p=subprocess.run(cmd,env=dict(env,**extra),capture_output=True,text=True)
         assert (p.returncode==0)==ok,(cmd,p.stdout,p.stderr)
         return p
-    archive(); run(); assert (prefix/'bin/throne-gtk').is_file()
-    desktop=(prefix/'share/applications/dev.nalart.ThroneGtk.desktop').read_text()
+    # A previous installation is a data source, not disposable migration input.
+    old_data=pathlib.Path(env['HOME'])/'.config/throne-gtk/profiles.json'
+    old_data.parent.mkdir(parents=True); old_data.write_text('legacy user data')
+    old_launcher=prefix/'bin/throne-gtk'
+    old_launcher.parent.mkdir(parents=True); old_launcher.write_text('unverified legacy launcher')
+    old_desktop=prefix/'share/applications/dev.nalart.ThroneGtk.desktop'
+    old_desktop.parent.mkdir(parents=True); old_desktop.write_text('unverified integration')
+    archive(); run(); assert (prefix/'bin/nolurix').is_file()
+    assert old_data.read_text()=='legacy user data'
+    assert old_launcher.read_text()=='unverified legacy launcher'
+    assert old_desktop.read_text()=='unverified integration'
+    desktop=(prefix/'share/applications/dev.nalart.Nolurix.desktop').read_text()
     assert '%%' in desktop and '\\\\"' in desktop and '@EXEC@' not in desktop
-    unrelated=prefix/'lib/throne-gtk/unrelated'; unrelated.write_text('keep')
+    unrelated=prefix/'lib/nolurix/unrelated'; unrelated.write_text('keep')
     run(); assert unrelated.read_text()=='keep'
-    launcher=prefix/'bin/throne-gtk'
-    launcher.unlink(); launcher.symlink_to(prefix/'lib/throne-gtk/throne-gtk')
+    launcher=prefix/'bin/nolurix'
+    launcher.unlink(); launcher.symlink_to(prefix/'lib/nolurix/nolurix')
     run(False,FAIL_REPLACE='yes',FAIL_REPLACE_INDEX='6')
-    assert launcher.is_symlink() and os.readlink(launcher)==str(prefix/'lib/throne-gtk/throne-gtk')
+    assert launcher.is_symlink() and os.readlink(launcher)==str(prefix/'lib/nolurix/nolurix')
     assert unrelated.read_text()=='keep'
     run(); assert not launcher.is_symlink()
     hostile=base/'hostile-target'; hostile.write_text('untouched')
     launcher.unlink(); launcher.symlink_to(hostile)
     run(False); assert launcher.is_symlink() and hostile.read_text()=='untouched'
     launcher.unlink(); run()
-    original=(prefix/'bin/throne-gtk').read_bytes()
+    original=(prefix/'bin/nolurix').read_bytes()
     before={p:p.read_bytes() for p in prefix.rglob('*') if p.is_file()}
     run(False,FAIL_REPLACE='yes')
     assert all(p.read_bytes()==data for p,data in before.items())
@@ -111,21 +124,59 @@ cp "$FIXTURE/${url##*/}" "$out"
     for mode in ['missing','duplicate','mismatch']:
         checksum(mode); run(False)
     checksum(); run(False,FAIL_DOWNLOAD='yes')
+    # The pinned old asset is accepted only after a proven preferred-asset 404,
+    # and must have its own checksum. Other download errors never fall back.
+    legacy_asset=asset.replace('nolurix-', 'throne-gtk-', 1)
+    with tarfile.open(fixture/legacy_asset,'w:gz') as tar:
+        for path in paths:
+            oldpath=path.replace('nolurix-core','throne-gtk-core').replace('nolurix','throne-gtk').replace('dev.nalart.Nolurix','dev.nalart.ThroneGtk')
+            data=b'[Desktop Entry]\nName=Throne GTK\nIcon=dev.nalart.ThroneGtk\nExec=@EXEC@\n' if path.endswith('.in') else b'historical fixture only\n'
+            m=tarfile.TarInfo(name.replace('nolurix-','throne-gtk-',1)+'/'+oldpath)
+            m.size=len(data); tar.addfile(m,io.BytesIO(data))
+    checksum(file=legacy_asset)
+    # Unknown pre-existing old launchers/desktops are never overwritten.
+    run(False,MISSING_NEW_ASSET='yes')
+    assert old_launcher.read_text()=='unverified legacy launcher'
+    legacy_prefix=base/'historical-prefix'
+    legacy_args=['--version',version,'--prefix',str(legacy_prefix)]
+    p=run(args=legacy_args,MISSING_NEW_ASSET='yes')
+    assert 'historical Throne GTK v0.2.1, NOT branded Nolurix' in p.stdout
+    assert (legacy_prefix/'lib/throne-gtk/throne-gtk').read_bytes()==b'historical fixture only\n'
+    assert (legacy_prefix/'lib/throne-gtk/throne-gtk-core').read_bytes()==b'historical fixture only\n'
+    assert (legacy_prefix/'lib/throne-gtk/throne-gtk').stat().st_mode & 0o111
+    assert (legacy_prefix/'lib/throne-gtk/throne-gtk-core').stat().st_mode & 0o111
+    assert not (legacy_prefix/'lib/nolurix').exists()
+    assert 'lib/throne-gtk/throne-gtk' in (legacy_prefix/'bin/throne-gtk').read_text()
+    historical_desktop=(legacy_prefix/'share/applications/dev.nalart.ThroneGtk.desktop').read_text()
+    assert 'Name=Throne GTK' in historical_desktop and 'Icon=dev.nalart.ThroneGtk' in historical_desktop
+    assert 'lib/throne-gtk/throne-gtk' in historical_desktop
+    historical_files={p:p.read_bytes() for p in legacy_prefix.rglob('*') if p.is_file()}
+    run(args=legacy_args,MISSING_NEW_ASSET='yes')  # verified old upgrade
+    run(False,FAIL_DOWNLOAD='yes')
+    checksum('mismatch',file=legacy_asset); run(False,args=legacy_args,MISSING_NEW_ASSET='yes')
+    checksum()
+    run(args=legacy_args)  # New asset afterward installs the new identity alongside.
+    assert (legacy_prefix/'lib/nolurix/nolurix').is_file()
+    assert (legacy_prefix/'lib/nolurix/nolurix-core').is_file()
+    assert (legacy_prefix/'bin/nolurix').is_file()
+    assert (legacy_prefix/'share/applications/dev.nalart.Nolurix.desktop').is_file()
+    assert all(p.read_bytes()==data for p,data in historical_files.items())
+    assert old_data.read_text()=='legacy user data'
     for member,kind in [(name+'/../escape',tarfile.REGTYPE),(name+'/evil',tarfile.SYMTYPE),
                         (name+'/'+paths[0],tarfile.REGTYPE),(name+'/unexpected',tarfile.REGTYPE),
                         (name+'/hard',tarfile.LNKTYPE),(name+'/device',tarfile.CHRTYPE)]:
         archive((member,kind)); run(False)
-        assert (prefix/'bin/throne-gtk').read_bytes()==original
+        assert (prefix/'bin/nolurix').read_bytes()==original
     archive()
     run(False,MOCK_ARCH='aarch64'); run(False,MOCK_OS='FreeBSD')
     run(False,args=['--version','v1.2.3-rc1']); run(False,args=['--version',''])
     run(False,args=['--prefix','relative'])
     run(False,args=[],LATEST_URL='https://evil.invalid/releases/tag/v0.2.1')
-    run(False,args=[],LATEST_URL='https://github.com/nalart11/Throne-GTK/releases/tag/v0.2.1?bad')
+    run(False,args=[],LATEST_URL='https://github.com/nalart11/Nolurix/releases/tag/v0.2.1?bad')
     run(args=['--prefix',str(prefix)])
     link=base/'symlink'; link.symlink_to(prefix,target_is_directory=True)
     run(False,args=['--version',version,'--prefix',str(link)])
-    mac='throne-gtk-0.2.1-macos-arm64-testing-local.pkg'; (fixture/mac).write_bytes(b'mock pkg')
+    mac='nolurix-0.2.1-macos-arm64-testing-local.pkg'; (fixture/mac).write_bytes(b'mock pkg')
     checksum(file=mac)
     macenv=dict(MOCK_OS='Darwin',MOCK_ARCH='arm64')
     run(False,args=['--version',version,'--allow-unsigned-macos'],MAC_VERSION='14.7',**macenv)
@@ -135,6 +186,15 @@ cp "$FIXTURE/${url##*/}" "$out"
     run(args=['--version',version,'--allow-unsigned-macos'],**macenv)
     call=(fixture/'sudo-call').read_text()
     assert call.startswith('/usr/sbin/installer\n-pkg\n') and call.endswith('-target\n/\n')
+    uninstall=str(pathlib.Path(script).with_name('uninstall-linux.py'))
+    current=prefix/'lib/nolurix/nolurix'
+    saved=current.read_bytes(); current.write_bytes(b'unrelated replacement')
+    p=subprocess.run([sys.executable,uninstall,str(prefix)],capture_output=True)
+    assert p.returncode and current.read_bytes()==b'unrelated replacement'
+    current.write_bytes(saved)
+    subprocess.run([sys.executable,uninstall,str(prefix)],check=True)
+    assert unrelated.read_text()=='keep' and old_data.read_text()=='legacy user data'
+    assert old_launcher.exists() and old_desktop.exists()
     print('PASS: install/upgrade, checksum failures, archive safety, preservation, versions/latest, platform, symlink destinations, macOS consent/mock installer')
     print('PASS: legacy launcher migration, hostile launcher rejection, rollback, runtime version/missing-library checks')
     print('SKIP: root rejection (requires root); runtime libraries mocked; no real package execution.')

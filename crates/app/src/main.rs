@@ -1,4 +1,4 @@
-//! Throne GTK — a proxy client for sing-box and Xray with a GTK4 interface.
+//! Nolurix — a proxy client for sing-box and Xray with a GTK4 interface.
 
 mod engine;
 mod format;
@@ -26,10 +26,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use engine::{Command, Engine, Status};
+use nolurix_store::Store;
 use state::State;
-use throne_store::Store;
 
-const APP_ID: &str = "dev.nalart.ThroneGtk";
+const APP_ID: &str = "dev.nalart.Nolurix";
 
 fn main() -> glib::ExitCode {
     #[cfg(target_os = "macos")]
@@ -37,7 +37,7 @@ fn main() -> glib::ExitCode {
         .skip(1)
         .any(|arg| arg == "--unregister-helper")
     {
-        return match throne_ipc::unregister_helper() {
+        return match nolurix_ipc::unregister_helper() {
             Ok(()) => {
                 println!("Service Management helper unregistered. You can now replace or remove the installed bundle.");
                 glib::ExitCode::SUCCESS
@@ -59,11 +59,13 @@ fn main() -> glib::ExitCode {
         .with(logbridge::LogBridge::new(events_tx.clone()))
         .init();
 
-    let startup = Store::open(&paths::database()).and_then(|store| {
-        let settings = store.settings()?;
-        i18n::init(settings.language);
-        Ok(())
-    });
+    let startup = paths::migrate_default()
+        .and_then(|()| Store::open(&paths::database()))
+        .and_then(|store| {
+            let settings = store.settings()?;
+            i18n::init(settings.language);
+            Ok(())
+        });
 
     // Start tray setup before creating the window. Linux registers it from a
     // worker thread; macOS completes it on the first main-loop iteration.
@@ -344,8 +346,8 @@ fn load_styles() {
 fn show_fatal(app: &adw::Application, message: &str) {
     let dialog = adw::AlertDialog::builder()
         .heading(crate::i18n::tr(
-            "Не удалось запустить Throne GTK",
-            "Could not start Throne GTK",
+            "Не удалось запустить Nolurix",
+            "Could not start Nolurix",
         ))
         .body(message)
         .build();

@@ -10,7 +10,7 @@ use adw::prelude::*;
 
 use crate::i18n::tr;
 use crate::ui::Window;
-use throne_config::route::{Condition, MatchKind, MatchMode, RouteAction, RouteRule};
+use nolurix_config::route::{Condition, MatchKind, MatchMode, RouteAction, RouteRule};
 
 // Localized presentation only: stored rule names and condition values are data.
 fn kind_title(kind: MatchKind) -> &'static str {

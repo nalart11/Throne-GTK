@@ -44,7 +44,7 @@ impl Window {
     pub fn new(app: &adw::Application, state: Rc<State>) -> Rc<Self> {
         let root = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Throne GTK")
+            .title("Nolurix")
             .default_width(880)
             .default_height(660)
             .width_request(420)
@@ -279,9 +279,9 @@ impl Window {
                     {
                         let mut settings = this.state.settings.borrow_mut();
                         let next = if vpn {
-                            throne_config::settings::ProxyMode::Vpn
+                            nolurix_config::settings::ProxyMode::Vpn
                         } else {
-                            throne_config::settings::ProxyMode::Proxy
+                            nolurix_config::settings::ProxyMode::Proxy
                         };
                         if settings.mode == next {
                             return;
@@ -518,7 +518,7 @@ impl Window {
     fn apply_subscription(
         self: &Rc<Self>,
         gid: i64,
-        result: Result<throne_config::subscription::Parsed, String>,
+        result: Result<nolurix_config::subscription::Parsed, String>,
     ) {
         self.servers.set_updating(false);
         let parsed = match result {

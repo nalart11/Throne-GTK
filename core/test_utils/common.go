@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"ThroneGtkCore/internal/boxbox"
+	"github.com/nalart11/Nolurix/core/internal/boxbox"
 
 	"github.com/Mahdi-zarei/speedtest-go/speedtest"
 	"github.com/sagernet/sing-box/adapter"

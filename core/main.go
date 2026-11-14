@@ -1,10 +1,10 @@
 package main
 
 import (
-	"ThroneGtkCore/internal/boxmain"
-	"ThroneGtkCore/ipc"
-	"ThroneGtkCore/parentcheck"
 	"fmt"
+	"github.com/nalart11/Nolurix/core/internal/boxmain"
+	"github.com/nalart11/Nolurix/core/ipc"
+	"github.com/nalart11/Nolurix/core/parentcheck"
 	"github.com/xtls/xray-core/core"
 	"log"
 	"net"
@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "ThroneGtkCore/internal/distro/all"
+	_ "github.com/nalart11/Nolurix/core/internal/distro/all"
 	C "github.com/sagernet/sing-box/constant"
 )
 
@@ -85,21 +85,21 @@ func writeHeapProfile() (string, error) {
 }
 
 func RunCore() {
-	socketName := os.Getenv("THRONE_CORE_SOCKET")
+	socketName := os.Getenv("NOLURIX_CORE_SOCKET")
 	if socketName == "" {
-		log.Fatal("THRONE_CORE_SOCKET not set")
+		log.Fatal("NOLURIX_CORE_SOCKET not set")
 	}
-	debug = os.Getenv("THRONE_CORE_DEBUG") == "1"
+	debug = os.Getenv("NOLURIX_CORE_DEBUG") == "1"
 
 	guiPID := parentcheck.ParentPID
-	if value := os.Getenv("THRONE_CORE_GUI_PID"); value != "" {
+	if value := os.Getenv("NOLURIX_CORE_GUI_PID"); value != "" {
 		if !trustedGUIOverrideAllowed() {
-			log.Fatal("THRONE_CORE_GUI_PID is only accepted from the privileged helper worker")
+			log.Fatal("NOLURIX_CORE_GUI_PID is only accepted from the privileged helper worker")
 		}
 		var parseErr error
 		guiPID, parseErr = strconv.Atoi(value)
 		if parseErr != nil || guiPID <= 0 {
-			log.Fatalf("invalid THRONE_CORE_GUI_PID %q", value)
+			log.Fatalf("invalid NOLURIX_CORE_GUI_PID %q", value)
 		}
 	} else {
 		parentcheck.CheckParentProcess()

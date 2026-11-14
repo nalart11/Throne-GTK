@@ -1,8 +1,8 @@
 package main
 
 import (
-	"ThroneGtkCore/gen"
 	"context"
+	"github.com/nalart11/Nolurix/core/gen"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"

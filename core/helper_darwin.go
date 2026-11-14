@@ -3,13 +3,13 @@
 package main
 
 import (
-	"ThroneGtkCore/helpertrust"
-	"ThroneGtkCore/internal/sys"
-	"ThroneGtkCore/parentcheck"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nalart11/Nolurix/core/helpertrust"
+	"github.com/nalart11/Nolurix/core/internal/sys"
+	"github.com/nalart11/Nolurix/core/parentcheck"
 	"io"
 	"log"
 	"net"
@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const helperSocket = "/Library/Application Support/Throne GTK/run/helper.sock"
+const helperSocket = "/Library/Application Support/Nolurix/run/helper.sock"
 
 var admissions = make(chan struct{}, 16)
 var workers = struct {
@@ -195,11 +195,11 @@ func handleHelperRequest(conn *net.UnixConn) {
 			cmd := exec.Command(self, "--helper-worker")
 			cmd.Dir = "/"
 			cmd.Env = append([]string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/var/root", "TMPDIR=/private/tmp"},
-				"THRONE_CORE_SOCKET="+endpoint,
-				"THRONE_CORE_GUI_PID="+strconv.Itoa(pid),
-				"THRONE_CORE_CLIENT_UID="+strconv.Itoa(uid),
-				"THRONE_CORE_CLIENT_GID="+strconv.Itoa(gid),
-				fmt.Sprintf("THRONE_CORE_DEBUG=%d", boolInt(debug)),
+				"NOLURIX_CORE_SOCKET="+endpoint,
+				"NOLURIX_CORE_GUI_PID="+strconv.Itoa(pid),
+				"NOLURIX_CORE_CLIENT_UID="+strconv.Itoa(uid),
+				"NOLURIX_CORE_CLIENT_GID="+strconv.Itoa(gid),
+				fmt.Sprintf("NOLURIX_CORE_DEBUG=%d", boolInt(debug)),
 			)
 			err = cmd.Start()
 			if err == nil {
@@ -239,7 +239,7 @@ func recoverHelperDNS() {
 // The caller has already verified every ancestor of this fixed path. O_NOFOLLOW
 // and post-open inode/ownership checks prevent trusting a substituted lock file.
 func lockHelperEndpoint() (*os.File, error) {
-	const path = "/Library/Application Support/Throne GTK/run/helper.lock"
+	const path = "/Library/Application Support/Nolurix/run/helper.lock"
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
 	if err != nil {
 		return nil, err
@@ -292,15 +292,15 @@ func runHelperWorker() {
 	if err := os.Chdir("/"); err != nil {
 		log.Fatal(err)
 	}
-	pid, err := strconv.Atoi(os.Getenv("THRONE_CORE_GUI_PID"))
+	pid, err := strconv.Atoi(os.Getenv("NOLURIX_CORE_GUI_PID"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	uid, err := strconv.Atoi(os.Getenv("THRONE_CORE_CLIENT_UID"))
+	uid, err := strconv.Atoi(os.Getenv("NOLURIX_CORE_CLIENT_UID"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	endpoint := os.Getenv("THRONE_CORE_SOCKET")
+	endpoint := os.Getenv("NOLURIX_CORE_SOCKET")
 	if err := validateGUIEndpoint(endpoint, uid); err != nil {
 		log.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func runHelperWorker() {
 	// Enabled only after the privileged bootstrap and connected GUI peer have
 	// passed mandatory authentication. Ordinary core/test paths remain unchanged.
 	enablePrivilegedWorkerPolicy()
-	debug = os.Getenv("THRONE_CORE_DEBUG") == "1" // logging only; authentication above is unconditional.
+	debug = os.Getenv("NOLURIX_CORE_DEBUG") == "1" // logging only; authentication above is unconditional.
 	go func() {
 		for {
 			time.Sleep(5 * time.Second)

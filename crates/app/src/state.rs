@@ -5,8 +5,8 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use anyhow::Result;
-use throne_config::{Profile, Settings};
-use throne_store::Store;
+use nolurix_config::{Profile, Settings};
+use nolurix_store::Store;
 
 use crate::engine::{Command, Engine, Status};
 

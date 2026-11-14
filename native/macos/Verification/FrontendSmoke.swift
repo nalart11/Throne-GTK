@@ -85,7 +85,7 @@ struct FrontendSmoke {
                     "localized bridge error hid the backend reason")
         try checkRoutingSerialization()
         try checkProfileSearch()
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("throne-frontend-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nolurix-frontend-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let options = try Model.encode(["data_dir": directory.path, "core_path": directory.appendingPathComponent("missing-core").path])

@@ -1,5 +1,5 @@
-#ifndef THRONE_ACL_PRESENCE_H
-#define THRONE_ACL_PRESENCE_H
+#ifndef NOLURIX_ACL_PRESENCE_H
+#define NOLURIX_ACL_PRESENCE_H
 #include <stddef.h>
 
 // Only a successful metadata read AND successful presence query can prove

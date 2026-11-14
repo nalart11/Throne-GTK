@@ -1,9 +1,9 @@
 package main
 
 import (
-	"ThroneGtkCore/gen"
-	"ThroneGtkCore/internal/boxdns"
 	"context"
+	"github.com/nalart11/Nolurix/core/gen"
+	"github.com/nalart11/Nolurix/core/internal/boxdns"
 )
 
 func (s *server) SetSystemDNS(ctx context.Context, in *gen.SetSystemDNSRequest) (*gen.EmptyResp, error) {

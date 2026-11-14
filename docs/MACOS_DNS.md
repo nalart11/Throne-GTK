@@ -25,7 +25,12 @@ mutation it opens fresh locked preferences, snapshots protocol presence/enabled
 state and the complete configuration, and durably writes original and intended
 states to a versioned journal. Only then does it commit and apply preferences.
 
-The fixed recovery directory is `/private/var/db/throne-gtk-dns`. Production
+Nolurix deliberately retains `/private/var/db/throne-gtk-dns` as the shared
+recovery namespace. Keeping the permanent lock and journal path prevents an
+upgrade from orphaning recovery evidence or creating a second DNS lease domain.
+This is a compatibility path, not an alternate trusted helper identity. Pending
+records must still be safely recovered when retiring the old installation.
+Production
 ownership is root; directories/files are traversed without following symlinks,
 and journal input is size-limited. Journal replacement uses an exclusive random
 temporary file, file fsync, atomic rename and directory fsync. No subscription

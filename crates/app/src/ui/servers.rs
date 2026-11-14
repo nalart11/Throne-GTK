@@ -12,7 +12,7 @@ use adw::prelude::*;
 use crate::format;
 use crate::i18n::tr;
 use crate::state::State;
-use throne_config::profile::Group;
+use nolurix_config::profile::Group;
 
 pub struct ServersPage {
     pub widget: gtk::Box,
@@ -360,7 +360,7 @@ impl ServersPage {
                 let Some(this) = this.upgrade() else { return };
                 let profile = this.state.store.borrow().profile(id).ok().flatten();
                 let Some(profile) = profile else { return };
-                match throne_config::share::to_link(&profile) {
+                match nolurix_config::share::to_link(&profile) {
                     Ok(link) => {
                         button.clipboard().set_text(&link);
                         this.notify(tr("Ссылка скопирована", "Link copied"));
@@ -673,7 +673,7 @@ impl ServersPage {
     }
 }
 
-fn build_row(profile: &throne_config::Profile, active: bool) -> Row {
+fn build_row(profile: &nolurix_config::Profile, active: bool) -> Row {
     let name = gtk::Label::builder()
         .label(&profile.name)
         .xalign(0.0)
@@ -834,7 +834,7 @@ fn build_auto_row(count: usize, active: bool) -> Row {
 }
 
 /// What to show about the latest speed measurement: download, upload, and exit country.
-fn speed_label(profile: &throne_config::Profile) -> String {
+fn speed_label(profile: &nolurix_config::Profile) -> String {
     let mut parts = Vec::new();
     if !profile.dl_speed.is_empty() {
         parts.push(format!("↓ {}", profile.dl_speed));

@@ -1,5 +1,5 @@
 [package]
-name = "throne-ipc"
+name = "nolurix-ipc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

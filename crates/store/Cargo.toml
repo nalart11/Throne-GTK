@@ -1,5 +1,5 @@
 [package]
-name = "throne-store"
+name = "nolurix-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,10 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-throne-config = { path = "../config" }
-rusqlite = { version = "0.37", features = ["bundled"] }
+nolurix-config = { path = "../config" }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+tempfile = "3"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

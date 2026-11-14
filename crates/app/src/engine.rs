@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use nolurix_config::generate::GeneratedConfig;
+use nolurix_config::{subscription, Profile, Settings};
+use nolurix_ipc::pb;
+use nolurix_ipc::Core;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use throne_config::generate::GeneratedConfig;
-use throne_config::{subscription, Profile, Settings};
-use throne_ipc::pb;
-use throne_ipc::Core;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -95,7 +95,7 @@ impl Engine {
         let (cancel, signal) = cancellation();
         let (done_tx, done) = std::sync::mpsc::channel();
         let thread = std::thread::Builder::new()
-            .name("throne-engine".into())
+            .name("nolurix-engine".into())
             .spawn(move || {
                 let terminal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     work(receiver, signal)
@@ -405,7 +405,7 @@ struct SessionConfig {
 fn session_config(command: Command) -> Result<SessionConfig> {
     let (generated, settings, id, name, members) = match command {
         Command::Connect { profile, settings } => {
-            let generated = throne_config::generate(&profile, &settings).context(
+            let generated = nolurix_config::generate(&profile, &settings).context(
                 crate::i18n::tr("сборка конфига", "generating configuration"),
             )?;
             (generated, settings, profile.id, profile.name, Vec::new())
@@ -421,7 +421,7 @@ fn session_config(command: Command) -> Result<SessionConfig> {
                     "the group has no servers"
                 ));
             }
-            let generated = throne_config::generate::generate_auto(&profiles, &settings).context(
+            let generated = nolurix_config::generate::generate_auto(&profiles, &settings).context(
                 crate::i18n::tr("сборка конфига", "generating configuration"),
             )?;
             let members = generated
@@ -441,7 +441,7 @@ fn session_config(command: Command) -> Result<SessionConfig> {
     };
     let mut tags = generated.tags.clone();
     if !members.is_empty() {
-        tags.insert(0, throne_config::generate::tags::PROXY.into());
+        tags.insert(0, nolurix_config::generate::tags::PROXY.into());
     }
     Ok(SessionConfig {
         generated,
@@ -562,7 +562,7 @@ async fn session_body(
                         AutoControl::Recheck=>("recheck",None),
                         AutoControl::Pin(name)=>("select",Some(config.members.iter().find(|(_,n)|*n==name).map(|(tag,_)|tag.clone()).unwrap_or_default())),
                     };
-                    interrupt(cancel,core.client.auto_selector_action(pb::AutoSelectorActionRequest{tag:Some(throne_config::generate::tags::PROXY.into()),action:Some(action.into()),member})).await?;
+                    interrupt(cancel,core.client.auto_selector_action(pb::AutoSelectorActionRequest{tag:Some(nolurix_config::generate::tags::PROXY.into()),action:Some(action.into()),member})).await?;
                 }
             },
             _=poll.tick()=>{
@@ -691,7 +691,7 @@ async fn latency_job(
     if profiles.is_empty() {
         return Ok(0);
     }
-    let generated = throne_config::generate_test(&profiles, settings).context(crate::i18n::tr(
+    let generated = nolurix_config::generate_test(&profiles, settings).context(crate::i18n::tr(
         "сборка конфига теста",
         "generating test configuration",
     ))?;
@@ -747,7 +747,7 @@ async fn latency_job(
 /// StopTest always uses the measurement's own client, never a connection client.
 async fn test_rpc<T>(
     cancel: &Cancel,
-    client: &throne_ipc::CoreClient,
+    client: &nolurix_ipc::CoreClient,
     future: impl std::future::Future<Output = Result<T>>,
 ) -> Result<T> {
     measurement_rpc(cancel, future, client.stop_test()).await
@@ -772,7 +772,7 @@ async fn check_job(
     cancel: &Cancel,
     cleanup: &mut Option<String>,
 ) -> Result<()> {
-    let generated = throne_config::generate(profile, settings).context(crate::i18n::tr(
+    let generated = nolurix_config::generate(profile, settings).context(crate::i18n::tr(
         "сборка конфига",
         "generating configuration",
     ))?;
@@ -799,16 +799,17 @@ async fn speed_job(
     cancel: &Cancel,
     cleanup: &mut Option<String>,
 ) -> Result<Event> {
-    let generated = throne_config::generate_test(&[profile], settings).context(crate::i18n::tr(
-        "сборка конфига замера",
-        "generating speed test configuration",
-    ))?;
+    let generated =
+        nolurix_config::generate_test(&[profile], settings).context(crate::i18n::tr(
+            "сборка конфига замера",
+            "generating speed test configuration",
+        ))?;
     if cancel.requested() {
         return Err(cancelled());
     }
     let mut core = Core::spawn(bin, dir, false).await?;
     let result=async {
-        let mut request=throne_ipc::speed_test_request(generated.core_config.clone());
+        let mut request=nolurix_ipc::speed_test_request(generated.core_config.clone());
         request.outbound_tags=generated.tags.clone();request.test_download=Some(settings.speed_test_download);request.test_upload=Some(settings.speed_test_upload);request.timeout_ms=Some(settings.speed_test_timeout_ms);request.need_xray=Some(generated.need_xray);request.xray_config=Some(generated.xray_config.clone());
         let pending=core.client.speed_test(request);tokio::pin!(pending);
         let mut tick=tokio::time::interval(Duration::from_millis(700));tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -964,7 +965,7 @@ pub struct Connection {
 }
 
 fn load_request(generated: &GeneratedConfig, settings: &Settings) -> pb::LoadConfigReq {
-    let mut request = throne_ipc::load_request(generated.core_config.clone());
+    let mut request = nolurix_ipc::load_request(generated.core_config.clone());
     request.disable_stats = Some(!settings.stats_enabled);
     request.need_xray = Some(generated.need_xray);
     request.xray_config = Some(generated.xray_config.clone());
@@ -982,8 +983,8 @@ fn vpn_privilege_hint(_core_bin: &Path) -> String {
 
     #[cfg(target_os = "windows")]
     return crate::i18n::tr(
-        "для режима VPN перезапустите Throne GTK от имени администратора",
-        "restart Throne GTK as administrator for VPN mode",
+        "для режима VPN перезапустите Nolurix от имени администратора",
+        "restart Nolurix as administrator for VPN mode",
     )
     .into();
 
@@ -1295,7 +1296,7 @@ mod supervision_tests {
             let (tx, cancel) = cancellation();
             tx.send_replace(true);
             let profile =
-                throne_config::link::parse("trojan://pw@no-network.invalid:443#fixture").unwrap();
+                nolurix_config::link::parse("trojan://pw@no-network.invalid:443#fixture").unwrap();
             let settings = Box::<Settings>::default();
             let dir = std::env::temp_dir().join(format!(
                 "engine-never-created-{}-{}",

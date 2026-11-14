@@ -1,5 +1,5 @@
 [package]
-name = "throne-macos-bridge"
+name = "nolurix-macos-bridge"
 version.workspace = true
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -11,9 +11,9 @@ crate-type = ["staticlib", "rlib"]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-throne-config = { path = "../config" }
-throne-store = { path = "../store" }
-throne-ipc = { path = "../ipc" }
+nolurix-config = { path = "../config" }
+nolurix-store = { path = "../store" }
+nolurix-ipc = { path = "../ipc" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 async-channel = "2"
 tracing = "0.1"

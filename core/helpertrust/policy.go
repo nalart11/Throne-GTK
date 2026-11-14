@@ -11,9 +11,9 @@ import (
 	"syscall"
 )
 
-const Bundle = "/Library/Application Support/Throne GTK/Throne GTK.app"
-const GUI = Bundle + "/Contents/MacOS/throne-gtk"
-const Core = Bundle + "/Contents/MacOS/throne-gtk-core"
+const Bundle = "/Library/Application Support/Nolurix/Nolurix.app"
+const GUI = Bundle + "/Contents/MacOS/nolurix"
+const Core = Bundle + "/Contents/MacOS/nolurix-core"
 
 func CheckNode(path string, info fs.FileInfo, owner uint32) error {
 	if info.Mode()&os.ModeSymlink != 0 {

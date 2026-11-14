@@ -1,6 +1,6 @@
 //! The interface locale is immutable until the next process start.
+use nolurix_config::settings::Language;
 use std::sync::OnceLock;
-use throne_config::settings::Language;
 
 static LANGUAGE: OnceLock<Language> = OnceLock::new();
 
@@ -29,8 +29,8 @@ fn select<'a>(language: Language, ru: &'a str, en: &'a str) -> &'a str {
 macro_rules! tr_format {
     ($ru:literal, $en:literal $(, $($args:tt)*)?) => {
         match $crate::i18n::language() {
-            throne_config::settings::Language::Ru => format!($ru $(, $($args)*)?),
-            throne_config::settings::Language::En => format!($en $(, $($args)*)?),
+            nolurix_config::settings::Language::Ru => format!($ru $(, $($args)*)?),
+            nolurix_config::settings::Language::En => format!($en $(, $($args)*)?),
         }
     };
 }

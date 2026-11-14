@@ -1,13 +1,13 @@
 //! Reproduce synthetic policy goldens without user data or external requests:
-//! PRIVILEGED_FIXTURE_DIR=/tmp/opencode/privileged-fixtures cargo run -p throne-config --example privileged_fixtures
+//! PRIVILEGED_FIXTURE_DIR=/tmp/opencode/privileged-fixtures cargo run -p nolurix-config --example privileged_fixtures
 //! Copy the resulting JSON into core/testdata/privileged after review.
 use anyhow::{ensure, Result};
-use serde_json::{json, Value};
-use std::{env, fs, path::PathBuf};
-use throne_config::{
+use nolurix_config::{
     generate, link,
     settings::{ProxyMode, Settings},
 };
+use serde_json::{json, Value};
+use std::{env, fs, path::PathBuf};
 
 fn save(dir: &std::path::Path, name: &str, g: generate::GeneratedConfig) -> Result<()> {
     let mut core: Value = serde_json::from_str(&g.core_config)?;
@@ -71,13 +71,13 @@ fn main() -> Result<()> {
             generate::generate(&link::parse(uri)?, &settings)?,
         )?;
     }
-    let vmess = throne_config::profile::Profile::from_outbound(
+    let vmess = nolurix_config::profile::Profile::from_outbound(
         json!({"type":"vmess","server":"proxy.example","server_port":443,"uuid":"00000000-0000-0000-0000-000000000001","alter_id":0,"security":"auto","packet_encoding":"xudp","transport":{"type":"ws","path":"/synthetic-ws"}}),
     )?;
     settings.mux_enabled = true;
     save(&dir, "vmess-mux", generate::generate(&vmess, &settings)?)?;
     settings.mux_enabled = false;
-    let native = throne_config::profile::Profile::from_outbound(
+    let native = nolurix_config::profile::Profile::from_outbound(
         json!({"protocol":"vless","settings":{"vnext":[{"address":"proxy.example","port":443,"users":[{"id":"00000000-0000-0000-0000-000000000001","encryption":"none"}]}]},"streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"serverName":"proxy.example","fingerprint":"chrome"},"xhttpSettings":{"path":"/synthetic-native","mode":"auto","extra":{"xmux":{"maxConnections":"1-1"},"downloadSettings":{"address":"download.example","port":443,"network":"xhttp","security":"tls","tlsSettings":{"serverName":"download.example"},"xhttpSettings":{"path":"/synthetic-download","mode":"auto"}}}}}}),
     )?;
     save(
