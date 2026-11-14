@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "throne-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2076,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "throne-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2092,20 +2092,40 @@ dependencies = [
 
 [[package]]
 name = "throne-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
  "cc",
+ "libc",
  "prost",
  "prost-build",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
 
 [[package]]
+name = "throne-macos-bridge"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "throne-config",
+ "throne-ipc",
+ "throne-store",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "throne-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "rusqlite",

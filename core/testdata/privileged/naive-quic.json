@@ -1,0 +1,143 @@
+{
+  "core_config": {
+    "log": {
+      "level": "info",
+      "timestamp": true
+    },
+    "dns": {
+      "servers": [
+        {
+          "type": "tls",
+          "server": "1.1.1.1",
+          "tag": "dns-remote",
+          "detour": "proxy",
+          "domain_resolver": "dns-local"
+        },
+        {
+          "type": "https",
+          "server": "1.1.1.1",
+          "path": "/dns-query",
+          "tag": "dns-direct",
+          "domain_resolver": "dns-local"
+        },
+        {
+          "type": "local",
+          "tag": "dns-local"
+        }
+      ],
+      "rules": [
+        {
+          "action": "route",
+          "server": "dns-direct",
+          "rule_set": [
+            "geosite-private"
+          ]
+        },
+        {
+          "action": "route",
+          "server": "dns-remote",
+          "strategy": "prefer_ipv4"
+        }
+      ]
+    },
+    "inbounds": [
+      {
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": "127.0.0.1",
+        "listen_port": 2080
+      },
+      {
+        "type": "tun",
+        "tag": "tun-in",
+        "address": [
+          "172.19.0.1/30"
+        ],
+        "mtu": 1500,
+        "auto_route": true,
+        "strict_route": true,
+        "stack": "mixed",
+        "auto_redirect": true
+      }
+    ],
+    "outbounds": [
+      {
+        "type": "naive",
+        "server": "proxy.example",
+        "server_port": 443,
+        "username": "synthetic-user",
+        "password": "synthetic-password",
+        "quic": true,
+        "quic_congestion_control": "bbr",
+        "udp_over_tcp": true,
+        "tls": {
+          "enabled": true,
+          "server_name": "proxy.example"
+        },
+        "tag": "proxy"
+      },
+      {
+        "type": "direct",
+        "tag": "direct"
+      }
+    ],
+    "route": {
+      "rules": [
+        {
+          "action": "sniff"
+        },
+        {
+          "protocol": "dns",
+          "action": "hijack-dns"
+        },
+        {
+          "inbound": [
+            "mixed-in",
+            "tun-in"
+          ],
+          "action": "resolve",
+          "strategy": "prefer_ipv4"
+        },
+        {
+          "action": "route",
+          "outbound": "direct",
+          "ip_is_private": true
+        },
+        {
+          "action": "route",
+          "outbound": "direct",
+          "rule_set": [
+            "geosite-private"
+          ]
+        }
+      ],
+      "final": "proxy",
+      "default_domain_resolver": {
+        "server": "dns-direct",
+        "strategy": "prefer_ipv4"
+      },
+      "rule_set": [
+        {
+          "type": "remote",
+          "tag": "geosite-private",
+          "format": "binary",
+          "url": "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-private.srs",
+          "download_detour": "proxy"
+        }
+      ],
+      "find_process": true,
+      "auto_detect_interface": true
+    },
+    "experimental": {
+      "cache_file": {
+        "enabled": true,
+        "store_fakeip": false,
+        "path": "/synthetic/user/cache.db"
+      },
+      "clash_api": {
+        "default_mode": ""
+      }
+    }
+  },
+  "xray_config": null
+}

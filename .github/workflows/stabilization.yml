@@ -1,0 +1,101 @@
+name: Stage 0 stabilization
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stabilization-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Build/test/package only: no installation, TUN, system proxy, Developer ID
+# signing, notarization, or release publishing on hosted runners.
+jobs:
+  build-test:
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS 14 runners retired on 2026-11-02; use supported Apple Silicon.
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      GOTOOLCHAIN: go1.26.0
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config protobuf-compiler libgtk-4-dev libadwaita-1-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install pkgconf protobuf gtk4 libadwaita dylibbundler librsvg
+
+      # The application enables GTK 4.12 and libadwaita 1.5 Cargo features.
+      - name: Verify native dependency versions
+        run: |
+          pkg-config --atleast-version=4.12 gtk4
+          pkg-config --atleast-version=1.5 libadwaita-1
+          pkg-config --modversion gtk4 libadwaita-1
+          protoc --version
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache-dependency-path: core/go.sum
+
+      - name: Install Just
+        run: cargo install just --locked
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test macOS packaging guards (portable)
+        run: bash scripts/test-macos-packaging.sh
+
+      - name: Test Rust workspace
+        run: just test
+
+      # Report the existing warning baseline; do not turn warnings into errors.
+      - name: Check Rust with Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test Go core
+        working-directory: core
+        run: go test ./...
+
+      - name: Vet Go core
+        working-directory: core
+        run: go vet ./...
+
+      # Keep shipped build tags, platform-specific CGO flags, Cronet handling,
+      # and Rust output paths in the Justfile rather than duplicating them here.
+      - name: Build shipped core and application
+        run: just build
+
+      - name: Exercise isolated IPC and loopback proxy
+        run: just ipc-smoke
+
+      - name: Build ad-hoc DMG and local PKG (no installation)
+        if: runner.os == 'macOS'
+        run: |
+          ./scripts/package-macos.sh
+          ./scripts/package-macos-installer.sh --dev-manual

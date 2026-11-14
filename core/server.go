@@ -52,7 +52,7 @@ var xrayFullGates []*xray.Gate
 
 // Reached only from Start/Stop, i.e. always under lifecycleMu.
 var extraProcess *process.Process
-var needUnsetDNS bool
+var systemDNSLease *sys.DNSLease
 var debug bool
 
 var errInstanceNotRunning = errors.New("Instance is not running")
@@ -335,6 +335,14 @@ func speedTestResultToProto(res test_utils.SpeedTestResult) *gen.SpeedTestResult
 }
 
 func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.ErrorResp, _ error) {
+	if err := AuthorizePrivilegedWorkerMethod("Start"); err != nil {
+		return &gen.ErrorResp{Error: To(err.Error())}, nil
+	}
+	var policyErr error
+	in, policyErr = privilegedStartRequest(in)
+	if policyErr != nil {
+		return &gen.ErrorResp{Error: To(policyErr.Error())}, nil
+	}
 	lifecycleMu.Lock()
 	defer lifecycleMu.Unlock()
 
@@ -344,24 +352,34 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		out = &gen.ErrorResp{}
 		if err != nil {
 			out.Error = To(err.Error())
-			setBoxInstance(nil, nil)
-			autoRedirectMark.Store(0)
 		}
 	}()
 
-	if debug {
-		log.Println("Start:", *in.CoreConfig)
-		if in.XrayConfig != nil {
-			log.Println("Start Xray:", *in.XrayConfig)
-		}
-	}
+	// Configurations contain credentials. Never log their contents, even when
+	// diagnostic logging is enabled.
 
 	if currentBox() != nil {
 		err = errors.New("instance already started")
 		return
 	}
 
-	if *in.NeedExtraProcess {
+	// Rejection above must never mutate resources owned by a prior Start.
+	if err = ctx.Err(); err != nil {
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			if extraProcess != nil {
+				extraProcess.Stop()
+				extraProcess = nil
+			}
+			closeXray()
+			autoRedirectMark.Store(0)
+		}
+	}()
+
+	if in.GetNeedExtraProcess() {
 		args, e := shlex.Split(in.GetExtraProcessArgs())
 		if e != nil {
 			err = E.Cause(e, "Failed to parse args")
@@ -384,7 +402,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 			}
 		}
 
-		extraProcess = process.NewProcess(*in.ExtraProcessPath, args, *in.ExtraNoOut)
+		extraProcess = process.NewProcess(in.GetExtraProcessPath(), args, in.GetExtraNoOut())
 		extraProcess.SetCleanupPath(extraCleanupPath)
 		err = extraProcess.Start()
 		if err != nil {
@@ -392,6 +410,9 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 	}
 
+	if err = ctx.Err(); err != nil {
+		return
+	}
 	autoRedirectMark.Store(autoRedirectMarkFor([]byte(in.GetCoreConfig())))
 
 	dnsAddr := in.GetXrayOutboundDnsAddress()
@@ -409,18 +430,25 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		return nil
 	}
 
-	if *in.NeedXray {
+	if in.GetNeedXray() {
+		if err = ctx.Err(); err != nil {
+			return
+		}
 		// Published only once fully up; error paths close what they built.
 		if in.GetXrayLazyStart() {
-			gate, e := xray.StartGate(*in.XrayConfig,
+			gate, e := xray.StartGate(in.GetXrayConfig(),
 				time.Duration(in.GetXrayIdleSeconds())*time.Second, prepareXray)
 			if e != nil {
 				err = e
 				return
 			}
+			if err = ctx.Err(); err != nil {
+				gate.Close()
+				return
+			}
 			setXray(nil, gate)
 		} else {
-			instance, e := xray.CreateXrayInstance(*in.XrayConfig)
+			instance, e := xray.CreateXrayInstance(in.GetXrayConfig())
 			if e != nil {
 				err = e
 				return
@@ -435,11 +463,18 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 				err = e
 				return
 			}
+			if err = ctx.Err(); err != nil {
+				instance.Close()
+				return
+			}
 			setXray(instance, nil)
 		}
 	}
 
 	if fullConfigs := in.GetXrayFullConfigs(); len(fullConfigs) > 0 {
+		if err = ctx.Err(); err != nil {
+			return
+		}
 		gates, e := startXrayFullGates(fullConfigs,
 			time.Duration(in.GetXrayFullIdleSeconds())*time.Second, prepareXray)
 		if e != nil {
@@ -447,10 +482,19 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 			err = e
 			return
 		}
+		if err = ctx.Err(); err != nil {
+			for _, gate := range gates {
+				gate.Close()
+			}
+			return
+		}
 		setXrayFullGates(gates)
 	}
 
-	box, cancel, err := boxmain.Create([]byte(*in.CoreConfig))
+	if err = ctx.Err(); err != nil {
+		return
+	}
+	box, cancel, err := boxmain.Create([]byte(in.GetCoreConfig()))
 	if err != nil {
 		if extraProcess != nil {
 			extraProcess.Stop()
@@ -459,40 +503,45 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		closeXray()
 		return
 	}
-	setBoxInstance(box, cancel)
+	defer func() {
+		if !committed {
+			if systemDNSLease != nil {
+				err = errors.Join(err, systemDNSLease.Close())
+				systemDNSLease = nil
+			}
+			box.CloseWithTimeout(cancel, 2*time.Second, log.Println, true)
+		}
+	}()
+	if err = ctx.Err(); err != nil {
+		return
+	}
 
 	if runtime.GOOS == "darwin" && in.GetTunIpv4Cidr() != "" {
-		stopAllCores := func() {
-			box.CloseWithTimeout(cancel, time.Second*2, log.Println, true)
-			setBoxInstance(nil, nil)
-			if extraProcess != nil {
-				extraProcess.Stop()
-				extraProcess = nil
-			}
-			closeXray()
-		}
 
 		tunCIDR := in.GetTunIpv4Cidr()
 		tunPrefix, parseErr := netip.ParsePrefix(tunCIDR)
 		if parseErr != nil || !tunPrefix.Addr().Is4() {
 			err = fmt.Errorf("invalid tun_ipv4_cidr %q", tunCIDR)
-			stopAllCores()
 			return
 		}
 
 		tunDNS := tunPrefix.Addr().Next()
 		if !tunDNS.IsValid() || !tunDNS.Is4() {
 			err = fmt.Errorf("got invalid DNS IP from tun_ipv4_cidr: %s", tunDNS)
-			stopAllCores()
 			return
 		}
 
-		if err := sys.SetSystemDNS(tunDNS.String(), box.Network().InterfaceMonitor()); err != nil {
-			log.Println("Failed to set system DNS:", err)
+		systemDNSLease, err = sys.AcquireSystemDNS(tunDNS.String(), box.Network().InterfaceMonitor())
+		if err != nil {
+			return
 		}
-
-		needUnsetDNS = true
 	}
+
+	if err = ctx.Err(); err != nil {
+		return
+	}
+	setBoxInstance(box, cancel)
+	committed = true
 
 	return
 }
@@ -515,12 +564,9 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 		return
 	}
 
-	if needUnsetDNS {
-		needUnsetDNS = false
-		err := sys.SetSystemDNS("Empty", box.Network().InterfaceMonitor())
-		if err != nil {
-			log.Println("Failed to unset system DNS:", err)
-		}
+	if systemDNSLease != nil {
+		err = systemDNSLease.Close()
+		systemDNSLease = nil
 	}
 	// Unpublished first, so a poll mid-teardown sees no instance rather than a dying one.
 	setBoxInstance(nil, nil)
@@ -540,6 +586,9 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 }
 
 func (s *server) CheckConfig(ctx context.Context, in *gen.LoadConfigReq) (out *gen.ErrorResp, _ error) {
+	if err := AuthorizePrivilegedWorkerMethod("CheckConfig"); err != nil {
+		return &gen.ErrorResp{Error: To(err.Error())}, nil
+	}
 	out = &gen.ErrorResp{}
 	// boxmain.Check can panic on malformed configs; unrecovered it reaches main()'s
 	// os.Exit(0) and kills the core. Stack to the log, panic value to the wire.
@@ -567,6 +616,9 @@ func (s *server) CheckConfig(ctx context.Context, in *gen.LoadConfigReq) (out *g
 }
 
 func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, error) {
+	if err := AuthorizePrivilegedWorkerMethod("Test"); err != nil {
+		return nil, err
+	}
 	env, err := prepareTestEnv(in.GetTestCurrent(), in.GetNeedXray(), in.GetXrayConfig(),
 		in.XrayFullConfigs, in.GetConfig(), in.OutboundTags, in.GetUseDefaultOutbound())
 	if err != nil {
@@ -626,6 +678,9 @@ func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.Q
 }
 
 func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTestResp, error) {
+	if err := AuthorizePrivilegedWorkerMethod("IPTest"); err != nil {
+		return nil, err
+	}
 	// Always builds its own box: there is no test-current variant of an IP test.
 	env, err := prepareTestEnv(false, in.GetNeedXray(), in.GetXrayConfig(),
 		in.XrayFullConfigs, in.GetConfig(), in.OutboundTags, in.GetUseDefaultOutbound())
@@ -771,6 +826,9 @@ func (s *server) IsPrivileged(ctx context.Context, _ *gen.EmptyReq) (*gen.IsPriv
 }
 
 func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.SpeedTestResponse, error) {
+	if err := AuthorizePrivilegedWorkerMethod("SpeedTest"); err != nil {
+		return nil, err
+	}
 	if !*in.TestDownload && !*in.TestUpload && !*in.SimpleDownload && !*in.OnlyCountry {
 		return nil, errors.New("cannot run empty test")
 	}

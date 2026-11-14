@@ -2,6 +2,10 @@ package xray
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf/serial"
 )
@@ -10,17 +14,17 @@ func CreateXrayInstance(config string) (*core.Instance, error) {
 	r := bytes.NewReader([]byte(config))
 	conf, err := serial.DecodeJSONConfig(r)
 	if err != nil {
-		return nil, err
+		return nil, configError("decode config", err)
 	}
 
 	b, err := conf.Build()
 	if err != nil {
-		return nil, err
+		return nil, configError("build config", err)
 	}
 
 	server, err := core.New(b)
 	if err != nil {
-		return nil, err
+		return nil, configError("construct instance", err)
 	}
 
 	return server, nil
@@ -37,8 +41,26 @@ func CheckXrayConfig(config string) error {
 	r := bytes.NewReader([]byte(config))
 	conf, err := serial.DecodeJSONConfig(r)
 	if err != nil {
-		return err
+		return configError("decode config", err)
 	}
 	_, err = conf.Build()
-	return err
+	if err != nil {
+		return configError("build config", err)
+	}
+	return nil
+}
+
+// Configuration constructors may interpolate credentials, arbitrary field names,
+// or whole JSON fragments. Never wrap their errors or retain them as causes.
+// Runtime Start/Dial errors are handled separately and are not redacted here.
+func configError(stage string, err error) error {
+	var syntax *json.SyntaxError
+	if errors.As(err, &syntax) {
+		return fmt.Errorf("xray: %s: invalid JSON syntax at byte offset %d", stage, syntax.Offset)
+	}
+	var mismatch *json.UnmarshalTypeError
+	if errors.As(err, &mismatch) {
+		return fmt.Errorf("xray: %s: invalid value type at byte offset %d", stage, mismatch.Offset)
+	}
+	return fmt.Errorf("xray: %s: invalid configuration", stage)
 }

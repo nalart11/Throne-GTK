@@ -4,6 +4,7 @@
 /target/
 /core/build/
 /dist/
+.build/
 /.idea
 .DS_Store
 
@@ -12,3 +13,4 @@
 *.db-shm
 *.db-wal
 *.log
+.slim/deepwork/

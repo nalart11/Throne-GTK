@@ -10,11 +10,11 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::ui::Window;
-use throne_config::settings::{DomainStrategy, TunStack};
+use throne_config::settings::{DomainStrategy, Language, TunStack};
 
 pub fn open(window: &Rc<Window>) {
     let dialog = adw::PreferencesDialog::builder()
-        .title("Настройки")
+        .title(crate::i18n::tr("Настройки", "Settings"))
         .content_width(560)
         .content_height(640)
         .build();
@@ -32,26 +32,35 @@ fn edit(window: &Rc<Window>, apply: impl FnOnce(&mut throne_config::Settings)) {
         apply(&mut settings);
     }
     if let Err(e) = window.state().save_settings() {
-        window.toast(&format!("Не удалось сохранить настройки: {e}"));
+        window.toast(&crate::tr_format!(
+            "Не удалось сохранить настройки: {e}",
+            "Could not save settings: {e}"
+        ));
     }
 }
 
 fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Соединение")
+        .title(crate::i18n::tr("Соединение", "Connection"))
         .icon_name("network-workgroup-symbolic")
         .build();
 
     let settings = window.state().settings.borrow().clone();
 
     let group = adw::PreferencesGroup::builder()
-        .title("Локальный прокси")
-        .description("Порт, на который настраиваются браузер и другие программы")
+        .title(crate::i18n::tr("Локальный прокси", "Local proxy"))
+        .description(crate::i18n::tr(
+            "Порт, на который настраиваются браузер и другие программы",
+            "Port used by the browser and other applications",
+        ))
         .build();
 
     let port = adw::SpinRow::builder()
-        .title("Порт")
-        .subtitle("SOCKS5 и HTTP на одном порту")
+        .title(crate::i18n::tr("Порт", "Port"))
+        .subtitle(crate::i18n::tr(
+            "SOCKS5 и HTTP на одном порту",
+            "SOCKS5 and HTTP on the same port",
+        ))
         .adjustment(&gtk::Adjustment::new(
             settings.mixed_port as f64,
             1024.0,
@@ -71,8 +80,14 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&port);
 
     let lan = adw::SwitchRow::builder()
-        .title("Открыть доступ из локальной сети")
-        .subtitle("Прокси примет подключения с других устройств в сети")
+        .title(crate::i18n::tr(
+            "Открыть доступ из локальной сети",
+            "Allow LAN access",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Прокси примет подключения с других устройств в сети",
+            "Accept proxy connections from other devices on the network",
+        ))
         .active(settings.allow_lan)
         .build();
     lan.connect_active_notify({
@@ -85,8 +100,14 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&lan);
 
     let sniffing = adw::SwitchRow::builder()
-        .title("Определять протокол и домен")
-        .subtitle("Нужно для правил по доменам и понятных имён в соединениях")
+        .title(crate::i18n::tr(
+            "Определять протокол и домен",
+            "Detect protocol and domain",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Нужно для правил по доменам и понятных имён в соединениях",
+            "Required for domain rules and readable names in connections",
+        ))
         .active(settings.sniffing)
         .build();
     sniffing.connect_active_notify({
@@ -100,15 +121,25 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Режим VPN")
-        .description("Применяется при следующем подключении")
+        .title(crate::i18n::tr("Режим VPN", "VPN mode"))
+        .description(crate::i18n::tr(
+            "Применяется при следующем подключении",
+            "Applies on the next connection",
+        ))
         .build();
 
-    let stacks = ["Смешанный", "Системный", "gVisor"];
+    let stacks = [
+        crate::i18n::tr("Смешанный", "Mixed"),
+        crate::i18n::tr("Системный", "System"),
+        "gVisor",
+    ];
     let stack_values = [TunStack::Mixed, TunStack::System, TunStack::GVisor];
     let stack = adw::ComboRow::builder()
-        .title("Сетевой стек")
-        .subtitle("Смешанный подходит в большинстве случаев")
+        .title(crate::i18n::tr("Сетевой стек", "Network stack"))
+        .subtitle(crate::i18n::tr(
+            "Смешанный подходит в большинстве случаев",
+            "Mixed works best in most cases",
+        ))
         .model(&gtk::StringList::new(&stacks))
         .selected(
             stack_values
@@ -147,8 +178,11 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&mtu);
 
     let strict = adw::SwitchRow::builder()
-        .title("Строгая маршрутизация")
-        .subtitle("Закрывает обход туннеля мимо правил")
+        .title(crate::i18n::tr("Строгая маршрутизация", "Strict routing"))
+        .subtitle(crate::i18n::tr(
+            "Закрывает обход туннеля мимо правил",
+            "Prevent traffic from bypassing tunnel rules",
+        ))
         .active(settings.tun_strict_route)
         .build();
     strict.connect_active_notify({
@@ -161,7 +195,7 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&strict);
 
     let ipv6 = adw::SwitchRow::builder()
-        .title("IPv6 в туннеле")
+        .title(crate::i18n::tr("IPv6 в туннеле", "IPv6 in tunnel"))
         .active(settings.tun_ipv6)
         .build();
     ipv6.connect_active_notify({
@@ -175,15 +209,50 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Окно")
-        .description(
+        .title(crate::i18n::tr("Окно", "Window"))
+        .description(crate::i18n::tr(
             "Значок в трее рисует панель рабочего стола; без неё окно закрывается как обычно",
-        )
+            "The desktop panel provides the tray icon; without it, the window closes normally.",
+        ))
         .build();
 
+    let languages = ["Русский", "English"];
+    let language = adw::ComboRow::builder()
+        .title(crate::i18n::tr("Язык", "Language"))
+        .subtitle(crate::i18n::tr(
+            "Изменение вступит в силу после перезапуска приложения",
+            "The change takes effect after you restart the app.",
+        ))
+        .model(&gtk::StringList::new(&languages))
+        .selected(if settings.language == Language::Ru {
+            0
+        } else {
+            1
+        })
+        .build();
+    // Connect after selecting the saved value: initialization must never save.
+    language.connect_selected_notify({
+        let window = window.clone();
+        move |row| {
+            let value = if row.selected() == 0 {
+                Language::Ru
+            } else {
+                Language::En
+            };
+            edit(&window, |s| s.language = value);
+        }
+    });
+    group.add(&language);
+
     let to_tray = adw::SwitchRow::builder()
-        .title("Прятать в значок при закрытии")
-        .subtitle("Соединение продолжает работать, окно возвращается щелчком по значку")
+        .title(crate::i18n::tr(
+            "Прятать в значок при закрытии",
+            "Hide to tray on close",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Соединение продолжает работать, окно возвращается щелчком по значку",
+            "The connection stays active; click the tray icon to restore the window",
+        ))
         .active(settings.close_to_tray)
         .build();
     to_tray.connect_active_notify({
@@ -196,8 +265,14 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&to_tray);
 
     let minimized = adw::SwitchRow::builder()
-        .title("Запускать в значке")
-        .subtitle("При старте показывать только значок, без окна")
+        .title(crate::i18n::tr(
+            "Запускать в значке",
+            "Start minimized to tray",
+        ))
+        .subtitle(crate::i18n::tr(
+            "При старте показывать только значок, без окна",
+            "Show only the tray icon at startup, without the window",
+        ))
         .active(settings.start_minimized)
         .build();
     minimized.connect_active_notify({
@@ -215,7 +290,7 @@ fn connection_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
 fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Сеть")
+        .title(crate::i18n::tr("Сеть", "Network"))
         .icon_name("network-server-symbolic")
         .build();
 
@@ -223,12 +298,18 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
     let group = adw::PreferencesGroup::builder()
         .title("DNS")
-        .description("Схема в адресе задаёт транспорт: udp://, tls://, https://, quic://")
+        .description(crate::i18n::tr(
+            "Схема в адресе задаёт транспорт: udp://, tls://, https://, quic://",
+            "The address scheme selects the transport: udp://, tls://, https://, quic://",
+        ))
         .build();
 
     let enabled = adw::SwitchRow::builder()
-        .title("Своя служба DNS")
-        .subtitle("Без неё запросы уходят системному резолверу")
+        .title(crate::i18n::tr("Своя служба DNS", "Built-in DNS service"))
+        .subtitle(crate::i18n::tr(
+            "Без неё запросы уходят системному резолверу",
+            "When disabled, queries use the system resolver",
+        ))
         .active(settings.dns_enabled)
         .build();
     enabled.connect_active_notify({
@@ -241,7 +322,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&enabled);
 
     let remote = adw::EntryRow::builder()
-        .title("Через прокси")
+        .title(crate::i18n::tr("Через прокси", "Through proxy"))
         .text(&settings.dns_remote)
         .build();
     remote.connect_changed({
@@ -254,7 +335,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&remote);
 
     let direct = adw::EntryRow::builder()
-        .title("Напрямую")
+        .title(crate::i18n::tr("Напрямую", "Direct"))
         .text(&settings.dns_direct)
         .build();
     direct.connect_changed({
@@ -267,11 +348,11 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&direct);
 
     let strategies = [
-        "Как есть",
-        "Сначала IPv4",
-        "Сначала IPv6",
-        "Только IPv4",
-        "Только IPv6",
+        crate::i18n::tr("Как есть", "As is"),
+        crate::i18n::tr("Сначала IPv4", "Prefer IPv4"),
+        crate::i18n::tr("Сначала IPv6", "Prefer IPv6"),
+        crate::i18n::tr("Только IPv4", "IPv4 only"),
+        crate::i18n::tr("Только IPv6", "IPv6 only"),
     ];
     let strategy_values = [
         DomainStrategy::AsIs,
@@ -281,7 +362,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
         DomainStrategy::Ipv6Only,
     ];
     let strategy = adw::ComboRow::builder()
-        .title("Разрешение имён")
+        .title(crate::i18n::tr("Разрешение имён", "Name resolution"))
         .model(&gtk::StringList::new(&strategies))
         .selected(
             strategy_values
@@ -300,8 +381,11 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&strategy);
 
     let fakedns = adw::SwitchRow::builder()
-        .title("Подставные адреса")
-        .subtitle("Ускоряет соединение, но ломает программы, которым нужен настоящий IP")
+        .title(crate::i18n::tr("Подставные адреса", "Fake IP addresses"))
+        .subtitle(crate::i18n::tr(
+            "Ускоряет соединение, но ломает программы, которым нужен настоящий IP",
+            "Speeds up connections but breaks applications that need a real IP",
+        ))
         .active(settings.fakedns)
         .build();
     fakedns.connect_active_notify({
@@ -315,12 +399,18 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Маршрутизация")
+        .title(crate::i18n::tr("Маршрутизация", "Routing"))
         .build();
 
     let bypass = adw::SwitchRow::builder()
-        .title("Локальные адреса мимо прокси")
-        .subtitle("Домашняя сеть, .local и приватные диапазоны идут напрямую")
+        .title(crate::i18n::tr(
+            "Локальные адреса мимо прокси",
+            "Bypass proxy for local addresses",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Домашняя сеть, .local и приватные диапазоны идут напрямую",
+            "Home network, .local and private ranges connect directly",
+        ))
         .active(settings.bypass_private)
         .build();
     bypass.connect_active_notify({
@@ -333,7 +423,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&bypass);
 
     let rules = adw::ActionRow::builder()
-        .title("Правила маршрутизации")
+        .title(crate::i18n::tr("Правила маршрутизации", "Routing rules"))
         .subtitle(rules_subtitle(&settings))
         .activatable(true)
         .build();
@@ -354,11 +444,11 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Проверка серверов")
+        .title(crate::i18n::tr("Проверка серверов", "Server tests"))
         .build();
 
     let url = adw::EntryRow::builder()
-        .title("Адрес для проверки")
+        .title(crate::i18n::tr("Адрес для проверки", "Test URL"))
         .text(&settings.test_url)
         .build();
     url.connect_changed({
@@ -371,7 +461,7 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&url);
 
     let timeout = adw::SpinRow::builder()
-        .title("Таймаут, мс")
+        .title(crate::i18n::tr("Таймаут, мс", "Timeout, ms"))
         .adjustment(&gtk::Adjustment::new(
             settings.test_timeout_ms as f64,
             500.0,
@@ -391,7 +481,10 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&timeout);
 
     let concurrency = adw::SpinRow::builder()
-        .title("Одновременных проверок")
+        .title(crate::i18n::tr(
+            "Одновременных проверок",
+            "Concurrent tests",
+        ))
         .adjustment(&gtk::Adjustment::new(
             settings.test_concurrency as f64,
             1.0,
@@ -412,13 +505,25 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Автовыбор сервера")
-        .description("Ядро само держит лучший сервер группы и уходит с упавшего")
+        .title(crate::i18n::tr(
+            "Автовыбор сервера",
+            "Automatic server selection",
+        ))
+        .description(crate::i18n::tr(
+            "Ядро само держит лучший сервер группы и уходит с упавшего",
+            "The core keeps the best server in the group and switches away from failed servers",
+        ))
         .build();
 
     let interval = adw::SpinRow::builder()
-        .title("Перепроверка, секунд")
-        .subtitle("Как часто пересматриваются лучшие серверы группы")
+        .title(crate::i18n::tr(
+            "Перепроверка, секунд",
+            "Retest interval, seconds",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Как часто пересматриваются лучшие серверы группы",
+            "How often to reassess the best servers in the group",
+        ))
         .adjustment(&gtk::Adjustment::new(
             settings.auto_interval_secs as f64,
             30.0,
@@ -438,8 +543,14 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&interval);
 
     let tolerance = adw::SpinRow::builder()
-        .title("Запас на переключение, мс")
-        .subtitle("Насколько новый сервер должен быть быстрее текущего")
+        .title(crate::i18n::tr(
+            "Запас на переключение, мс",
+            "Switching margin, ms",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Насколько новый сервер должен быть быстрее текущего",
+            "How much faster a new server must be than the current one",
+        ))
         .adjustment(&gtk::Adjustment::new(
             settings.auto_tolerance_ms as f64,
             0.0,
@@ -459,8 +570,14 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&tolerance);
 
     let balance = adw::SwitchRow::builder()
-        .title("Распределять по нескольким серверам")
-        .subtitle("Вместо одного лучшего используются все подходящие по очереди")
+        .title(crate::i18n::tr(
+            "Распределять по нескольким серверам",
+            "Distribute across multiple servers",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Вместо одного лучшего используются все подходящие по очереди",
+            "Use all suitable servers in turn instead of a single best server",
+        ))
         .active(settings.auto_balance)
         .build();
     balance.connect_active_notify({
@@ -474,12 +591,15 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     page.add(&group);
 
     let group = adw::PreferencesGroup::builder()
-        .title("Замер скорости")
-        .description("Запускается для одного сервера из меню строки")
+        .title(crate::i18n::tr("Замер скорости", "Speed test"))
+        .description(crate::i18n::tr(
+            "Запускается для одного сервера из меню строки",
+            "Run for a single server from its row menu",
+        ))
         .build();
 
     let download = adw::SwitchRow::builder()
-        .title("Мерить приём")
+        .title(crate::i18n::tr("Мерить приём", "Measure download"))
         .active(settings.speed_test_download)
         .build();
     download.connect_active_notify({
@@ -492,8 +612,11 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&download);
 
     let upload = adw::SwitchRow::builder()
-        .title("Мерить отдачу")
-        .subtitle("Удваивает время замера")
+        .title(crate::i18n::tr("Мерить отдачу", "Measure upload"))
+        .subtitle(crate::i18n::tr(
+            "Удваивает время замера",
+            "Doubles the test duration",
+        ))
         .active(settings.speed_test_upload)
         .build();
     upload.connect_active_notify({
@@ -506,7 +629,10 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&upload);
 
     let speed_timeout = adw::SpinRow::builder()
-        .title("Длительность замера, мс")
+        .title(crate::i18n::tr(
+            "Длительность замера, мс",
+            "Test duration, ms",
+        ))
         .adjustment(&gtk::Adjustment::new(
             settings.speed_test_timeout_ms as f64,
             2000.0,
@@ -531,17 +657,22 @@ fn network_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
 fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Ядро")
+        .title(crate::i18n::tr("Ядро", "Core"))
         .icon_name("applications-engineering-symbolic")
         .build();
 
     let settings = window.state().settings.borrow().clone();
 
-    let group = adw::PreferencesGroup::builder().title("Соединения").build();
+    let group = adw::PreferencesGroup::builder()
+        .title(crate::i18n::tr("Соединения", "Connections"))
+        .build();
 
     let mux = adw::SwitchRow::builder()
-        .title("Мультиплексирование")
-        .subtitle("Несколько запросов в одном соединении. Не применяется к XTLS и QUIC")
+        .title(crate::i18n::tr("Мультиплексирование", "Multiplexing"))
+        .subtitle(crate::i18n::tr(
+            "Несколько запросов в одном соединении. Не применяется к XTLS и QUIC",
+            "Multiple requests over one connection. Does not apply to XTLS or QUIC",
+        ))
         .active(settings.mux_enabled)
         .build();
     mux.connect_active_notify({
@@ -555,7 +686,10 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
 
     let protocols = ["h2mux", "smux", "yamux"];
     let protocol = adw::ComboRow::builder()
-        .title("Протокол мультиплексирования")
+        .title(crate::i18n::tr(
+            "Протокол мультиплексирования",
+            "Multiplexing protocol",
+        ))
         .model(&gtk::StringList::new(&protocols))
         .selected(
             protocols
@@ -574,8 +708,14 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&protocol);
 
     let stats = adw::SwitchRow::builder()
-        .title("Считать трафик и соединения")
-        .subtitle("Нужно для графика и страницы соединений")
+        .title(crate::i18n::tr(
+            "Считать трафик и соединения",
+            "Track traffic and connections",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Нужно для графика и страницы соединений",
+            "Required for the chart and connections page",
+        ))
         .active(settings.stats_enabled)
         .build();
     stats.connect_active_notify({
@@ -588,10 +728,12 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&stats);
     page.add(&group);
 
-    let group = adw::PreferencesGroup::builder().title("Журнал").build();
+    let group = adw::PreferencesGroup::builder()
+        .title(crate::i18n::tr("Журнал", "Log"))
+        .build();
     let levels = ["trace", "debug", "info", "warn", "error"];
     let level = adw::ComboRow::builder()
-        .title("Подробность")
+        .title(crate::i18n::tr("Подробность", "Verbosity"))
         .model(&gtk::StringList::new(&levels))
         .selected(
             levels
@@ -610,10 +752,15 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&level);
     page.add(&group);
 
-    let group = adw::PreferencesGroup::builder().title("Подписки").build();
+    let group = adw::PreferencesGroup::builder()
+        .title(crate::i18n::tr("Подписки", "Subscriptions"))
+        .build();
 
     let auto = adw::SwitchRow::builder()
-        .title("Обновлять автоматически")
+        .title(crate::i18n::tr(
+            "Обновлять автоматически",
+            "Update automatically",
+        ))
         .active(settings.sub_auto_update)
         .build();
     auto.connect_active_notify({
@@ -626,7 +773,7 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&auto);
 
     let interval = adw::SpinRow::builder()
-        .title("Интервал, минут")
+        .title(crate::i18n::tr("Интервал, минут", "Interval, minutes"))
         .adjustment(&gtk::Adjustment::new(
             settings.sub_auto_update_minutes as f64,
             10.0,
@@ -659,8 +806,14 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&agent);
 
     let send_hwid = adw::SwitchRow::builder()
-        .title("Отправлять HWID при обновлении")
-        .subtitle("Помогает подписке связать обновление с этим устройством")
+        .title(crate::i18n::tr(
+            "Отправлять HWID при обновлении",
+            "Send HWID when updating",
+        ))
+        .subtitle(crate::i18n::tr(
+            "Помогает подписке связать обновление с этим устройством",
+            "Helps the subscription associate updates with this device",
+        ))
         .active(settings.sub_send_hwid)
         .build();
     send_hwid.connect_active_notify({
@@ -673,8 +826,14 @@ fn core_page(window: &Rc<Window>) -> adw::PreferencesPage {
     group.add(&send_hwid);
 
     let custom_hwid = adw::EntryRow::builder()
-        .title("Параметры HWID (необязательно)")
-        .tooltip_text("Формат: hwid=...,os=...,osVersion=...,model=...")
+        .title(crate::i18n::tr(
+            "Параметры HWID (необязательно)",
+            "HWID parameters (optional)",
+        ))
+        .tooltip_text(crate::i18n::tr(
+            "Формат: hwid=...,os=...,osVersion=...,model=...",
+            "Format: hwid=...,os=...,osVersion=...,model=...",
+        ))
         .text(&settings.sub_custom_hwid_params)
         .build();
     custom_hwid.connect_changed({
@@ -696,11 +855,18 @@ fn rules_subtitle(settings: &throne_config::Settings) -> String {
     let enabled = settings.route_rules.iter().filter(|r| r.enabled).count();
     let raw = !settings.custom_route_rules.trim().is_empty();
     match (total, raw) {
-        (0, false) => "Ничего не задано".into(),
-        (0, true) => "Задано текстом".into(),
-        (n, false) if n == enabled => format!("Правил: {n}"),
-        (n, false) => format!("Правил: {n}, из них выключено {}", n - enabled),
-        (n, true) => format!("Правил: {n} и правила текстом"),
+        (0, false) => crate::i18n::tr("Ничего не задано", "No rules configured").into(),
+        (0, true) => crate::i18n::tr("Задано текстом", "Configured as text").into(),
+        (n, false) if n == enabled => crate::tr_format!("Правил: {n}", "Rules: {n}"),
+        (n, false) => crate::tr_format!(
+            "Правил: {n}, из них выключено {}",
+            "Rules: {n}, disabled: {}",
+            n - enabled
+        ),
+        (n, true) => crate::tr_format!(
+            "Правил: {n} и правила текстом",
+            "Rules: {n}, plus text rules"
+        ),
     }
 }
 
@@ -723,20 +889,23 @@ pub(crate) fn open_rules_editor(window: &Rc<Window>) {
         .build();
 
     let dialog = adw::Dialog::builder()
-        .title("Свои правила маршрутизации")
+        .title(crate::i18n::tr(
+            "Свои правила маршрутизации",
+            "Custom routing rules",
+        ))
         .content_width(620)
         .content_height(520)
         .build();
 
     let header = adw::HeaderBar::new();
     let save = gtk::Button::builder()
-        .label("Сохранить")
+        .label(crate::i18n::tr("Сохранить", "Save"))
         .css_classes(["suggested-action"])
         .build();
     header.pack_end(&save);
 
     let hint = gtk::Label::builder()
-        .label("Правила добавляются перед автоматическими. Пример:\n[{\"domain_suffix\": [\".ru\"], \"action\": \"route\", \"outbound\": \"direct\"}]")
+        .label(crate::i18n::tr("Правила добавляются перед автоматическими. Пример:\n[{\"domain_suffix\": [\".ru\"], \"action\": \"route\", \"outbound\": \"direct\"}]", "Rules are added before automatic rules. Example:\n[{\"domain_suffix\": [\".ru\"], \"action\": \"route\", \"outbound\": \"direct\"}]"))
         .xalign(0.0)
         .margin_top(10)
         .margin_start(12)
@@ -768,13 +937,13 @@ pub(crate) fn open_rules_editor(window: &Rc<Window>) {
             // connecting, after the rules have already been forgotten.
             if !text.trim().is_empty() {
                 if let Err(e) = serde_json::from_str::<serde_json::Value>(text.trim()) {
-                    window.toast(&format!("Это не JSON: {e}"));
+                    window.toast(&crate::tr_format!("Это не JSON: {e}", "Invalid JSON: {e}"));
                     return;
                 }
             }
             edit(&window, |s| s.custom_route_rules = text);
             dialog.close();
-            window.toast("Правила сохранены");
+            window.toast(crate::i18n::tr("Правила сохранены", "Rules saved"));
         }
     });
 

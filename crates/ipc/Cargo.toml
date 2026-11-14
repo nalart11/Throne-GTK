@@ -10,6 +10,9 @@ tracing.workspace = true
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time", "process"] }
 bytes = "1"
+libc = "0.2"
+tempfile = "3"
+serde_json = "1"
 
 [build-dependencies]
 prost-build = "0.13"

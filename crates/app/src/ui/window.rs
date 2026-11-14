@@ -59,13 +59,21 @@ impl Window {
         let logs = logs::LogsPage::new(state.clone());
 
         stack
-            .add_titled(&servers.widget, Some("servers"), "Серверы")
+            .add_titled(
+                &servers.widget,
+                Some("servers"),
+                crate::i18n::tr("Серверы", "Servers"),
+            )
             .set_icon_name(Some("network-server-symbolic"));
         stack
-            .add_titled(&connections.widget, Some("connections"), "Соединения")
+            .add_titled(
+                &connections.widget,
+                Some("connections"),
+                crate::i18n::tr("Соединения", "Connections"),
+            )
             .set_icon_name(Some("network-transmit-receive-symbolic"));
         stack
-            .add_titled(&logs.widget, Some("logs"), "Журнал")
+            .add_titled(&logs.widget, Some("logs"), crate::i18n::tr("Журнал", "Log"))
             .set_icon_name(Some("text-x-generic-symbolic"));
 
         // ── header ───────────────────────────────────────────────────────
@@ -80,26 +88,29 @@ impl Window {
 
         let add_button = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("Добавить сервер или подписку")
+            .tooltip_text(crate::i18n::tr(
+                "Добавить сервер или подписку",
+                "Add server or subscription",
+            ))
             .build();
         header.pack_start(&add_button);
 
         let menu = gio_menu();
         let menu_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
-            .tooltip_text("Меню")
+            .tooltip_text(crate::i18n::tr("Меню", "Menu"))
             .menu_model(&menu)
             .build();
         header.pack_end(&menu_button);
 
         // ── status panel ────────────────────────────────────────────
         let state_label = gtk::Label::builder()
-            .label("НЕ ПОДКЛЮЧЕНО")
+            .label(crate::i18n::tr("НЕ ПОДКЛЮЧЕНО", "DISCONNECTED"))
             .xalign(0.0)
             .css_classes(["channel-state"])
             .build();
         let name_label = gtk::Label::builder()
-            .label("Сервер не выбран")
+            .label(crate::i18n::tr("Сервер не выбран", "No server selected"))
             .xalign(0.0)
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .css_classes(["channel-name", "empty"])
@@ -115,7 +126,7 @@ impl Window {
         titles.append(&name_label);
 
         let connect_button = gtk::Button::builder()
-            .label("Подключить")
+            .label(crate::i18n::tr("Подключить", "Connect"))
             .valign(gtk::Align::Center)
             .css_classes(["connect"])
             .build();
@@ -130,11 +141,11 @@ impl Window {
         let sparkline = Sparkline::new();
 
         let down_label = gtk::Label::builder()
-            .label("↓ 0 Б/с")
+            .label(crate::i18n::tr("↓ 0 Б/с", "↓ 0 B/s"))
             .css_classes(["channel-rate", "numeric"])
             .build();
         let up_label = gtk::Label::builder()
-            .label("↑ 0 Б/с")
+            .label(crate::i18n::tr("↑ 0 Б/с", "↑ 0 B/s"))
             .css_classes(["channel-rate", "numeric"])
             .build();
 
@@ -238,7 +249,10 @@ impl Window {
                 {
                     this.state.connect_selected();
                 } else {
-                    this.toast("Сначала выберите сервер в списке");
+                    this.toast(crate::i18n::tr(
+                        "Сначала выберите сервер в списке",
+                        "Select a server in the list first",
+                    ));
                 }
             }
         });
@@ -280,9 +294,15 @@ impl Window {
                     if this.state.is_connected() {
                         this.state.connect_selected();
                         this.toast(if vpn {
-                            "Переключаю на VPN — весь трафик системы"
+                            crate::i18n::tr(
+                                "Переключаю на VPN — весь трафик системы",
+                                "Switching to VPN — all system traffic",
+                            )
                         } else {
-                            "Переключаю на прокси — только приложения с настройкой"
+                            crate::i18n::tr(
+                                "Переключаю на прокси — только приложения с настройкой",
+                                "Switching to proxy — configured applications only",
+                            )
                         });
                     }
                 }
@@ -303,9 +323,16 @@ impl Window {
                 let Some(this) = this.upgrade() else { return };
                 this.state.engine.send(Command::AutoPin(name.clone()));
                 this.toast(&if name.is_empty() {
-                    "Закрепление снято — автовыбор снова решает сам".to_string()
+                    crate::i18n::tr(
+                        "Закрепление снято — автовыбор снова решает сам",
+                        "Unpinned — automatic selection is active again",
+                    )
+                    .to_string()
                 } else {
-                    format!("Автовыбор закреплён на «{name}»")
+                    crate::tr_format!(
+                        "Автовыбор закреплён на «{name}»",
+                        "Automatic selection pinned to “{name}”"
+                    )
                 });
             }
         });
@@ -343,8 +370,10 @@ impl Window {
                 };
                 if matches!(status, Status::Disconnected | Status::Failed(_)) {
                     self.sparkline.clear();
-                    self.down_label.set_label("↓ 0 Б/с");
-                    self.up_label.set_label("↑ 0 Б/с");
+                    self.down_label
+                        .set_label(crate::i18n::tr("↓ 0 Б/с", "↓ 0 B/s"));
+                    self.up_label
+                        .set_label(crate::i18n::tr("↑ 0 Б/с", "↑ 0 B/s"));
                     self.connections.clear();
                 }
                 *self.state.status.borrow_mut() = status;
@@ -352,7 +381,8 @@ impl Window {
                 self.servers.refresh_active(self.state.connected_id());
                 if failed {
                     if let Some(message) = message {
-                        self.state.push_log(format!("ошибка: {message}"));
+                        self.state
+                            .push_log(crate::tr_format!("ошибка: {message}", "error: {message}"));
                         self.logs.refresh();
                         self.toast(&first_line(&message));
                     }
@@ -379,20 +409,24 @@ impl Window {
                 // Auto-selection changes the server itself; the header must show
                 // who is selected now, otherwise “Connected” says nothing.
                 let name = if selected.is_empty() {
-                    "выбирает сервер…".to_string()
+                    crate::i18n::tr("выбирает сервер…", "selecting a server…").to_string()
                 } else if !pinned.is_empty() && pinned == selected {
-                    format!("{selected} · закреплён")
+                    crate::tr_format!("{selected} · закреплён", "{selected} · pinned")
                 } else {
                     selected.clone()
                 };
-                self.name_label.set_label(&format!("Авто · {name}"));
+                self.name_label
+                    .set_label(&crate::tr_format!("Авто · {name}", "Auto · {name}"));
                 self.name_label.remove_css_class("empty");
                 self.state_label.set_label(&if suspended {
                     // The core distinguishes “network unavailable” from “servers
                     // are dead”; in the latter case retrying servers is pointless.
-                    "СЕТЬ НЕДОСТУПНА".to_string()
+                    crate::i18n::tr("СЕТЬ НЕДОСТУПНА", "NETWORK UNAVAILABLE").to_string()
                 } else {
-                    format!("ПОДКЛЮЧЕНО · ЖИВЫХ {alive} ИЗ {total}")
+                    crate::tr_format!(
+                        "ПОДКЛЮЧЕНО · ЖИВЫХ {alive} ИЗ {total}",
+                        "CONNECTED · {alive} OF {total} AVAILABLE"
+                    )
                 });
                 self.servers.mark_auto_member(&selected);
             }
@@ -405,8 +439,9 @@ impl Window {
                 *self.testing.borrow_mut() = false;
                 self.servers.set_testing(false);
                 self.toast(&match tested {
-                    0 => "Проверка не дала результатов".to_string(),
-                    n => format!("Проверено серверов: {n}"),
+                    0 => crate::i18n::tr("Проверка не дала результатов", "No test results")
+                        .to_string(),
+                    n => crate::tr_format!("Проверено серверов: {n}", "Servers tested: {n}"),
                 });
             }
             Event::SpeedProgress { id, stage } => self.servers.set_speed_progress(id, &stage),
@@ -434,21 +469,37 @@ impl Window {
                     }
                     self.servers.update_speed(id);
                     self.toast(&match (download.is_empty(), upload.is_empty()) {
-                        (false, false) => format!("Замер: ↓ {download}, ↑ {upload}"),
-                        (false, true) => format!("Замер: ↓ {download}"),
-                        (true, false) => format!("Замер: ↑ {upload}"),
-                        (true, true) => "Замер не дал результата".to_string(),
+                        (false, false) => crate::tr_format!(
+                            "Замер: ↓ {download}, ↑ {upload}",
+                            "Speed: ↓ {download}, ↑ {upload}"
+                        ),
+                        (false, true) => {
+                            crate::tr_format!("Замер: ↓ {download}", "Speed: ↓ {download}")
+                        }
+                        (true, false) => {
+                            crate::tr_format!("Замер: ↑ {upload}", "Speed: ↑ {upload}")
+                        }
+                        (true, true) => {
+                            crate::i18n::tr("Замер не дал результата", "No speed test result")
+                                .to_string()
+                        }
                     });
                 } else {
                     // The row returns to its previous value: displayed progress
                     // must not remain in place of the result.
                     self.servers.update_speed(id);
-                    self.toast(&first_line(&format!("Замер не удался: {error}")));
+                    self.toast(&first_line(&crate::tr_format!(
+                        "Замер не удался: {error}",
+                        "Speed test failed: {error}"
+                    )));
                 }
             }
             Event::Subscription { gid, result } => self.apply_subscription(gid, result),
             Event::ConfigChecked(result) => match result {
-                Ok(()) => self.toast("Конфигурация принята ядром"),
+                Ok(()) => self.toast(crate::i18n::tr(
+                    "Конфигурация принята ядром",
+                    "Configuration accepted by the core",
+                )),
                 Err(e) => self.toast(&first_line(&e)),
             },
             Event::Log(line) => {
@@ -456,7 +507,8 @@ impl Window {
                 self.logs.refresh();
             }
             Event::Error(message) => {
-                self.state.push_log(format!("ошибка: {message}"));
+                self.state
+                    .push_log(crate::tr_format!("ошибка: {message}", "error: {message}"));
                 self.logs.refresh();
                 self.toast(&first_line(&message));
             }
@@ -472,7 +524,8 @@ impl Window {
         let parsed = match result {
             Ok(parsed) => parsed,
             Err(e) => {
-                self.state.push_log(format!("подписка: {e}"));
+                self.state
+                    .push_log(crate::tr_format!("подписка: {e}", "subscription: {e}"));
                 self.logs.refresh();
                 self.toast(&first_line(&e));
                 return;
@@ -495,11 +548,15 @@ impl Window {
                 }
                 self.servers.reload();
                 self.refresh_channel();
-                self.toast(&format!(
-                    "Обновлено: {added} новых, {kept} прежних, {removed} удалено"
+                self.toast(&crate::tr_format!(
+                    "Обновлено: {added} новых, {kept} прежних, {removed} удалено",
+                    "Updated: {added} new, {kept} retained, {removed} removed"
                 ));
                 for error in parsed.errors.iter().take(5) {
-                    self.state.push_log(format!("подписка: {error}"));
+                    self.state.push_log(crate::tr_format!(
+                        "подписка: {error}",
+                        "subscription: {error}"
+                    ));
                 }
                 self.logs.refresh();
             }
@@ -526,10 +583,10 @@ impl Window {
     fn refresh_channel(self: &Rc<Self>) {
         let status = self.state.status.borrow().clone();
         let (label, class) = match &status {
-            Status::Disconnected => ("НЕ ПОДКЛЮЧЕНО", ""),
-            Status::Connecting => ("ПОДКЛЮЧАЮСЬ", "working"),
-            Status::Connected { .. } => ("ПОДКЛЮЧЕНО", "live"),
-            Status::Failed(_) => ("НЕ УДАЛОСЬ", "failed"),
+            Status::Disconnected => (crate::i18n::tr("НЕ ПОДКЛЮЧЕНО", "DISCONNECTED"), ""),
+            Status::Connecting => (crate::i18n::tr("ПОДКЛЮЧАЮСЬ", "CONNECTING"), "working"),
+            Status::Connected { .. } => (crate::i18n::tr("ПОДКЛЮЧЕНО", "CONNECTED"), "live"),
+            Status::Failed(_) => (crate::i18n::tr("НЕ УДАЛОСЬ", "FAILED"), "failed"),
         };
         self.state_label.set_label(label);
         set_state_class(&self.state_label, class);
@@ -537,7 +594,7 @@ impl Window {
         let name = match &status {
             Status::Connected { name, .. } => name.clone(),
             _ => match self.state.auto_selected() {
-                Some(_) => "Автовыбор".to_string(),
+                Some(_) => crate::i18n::tr("Автовыбор", "Auto select").to_string(),
                 None => self
                     .state
                     .selected_profile()
@@ -546,7 +603,8 @@ impl Window {
             },
         };
         if name.is_empty() {
-            self.name_label.set_label("Сервер не выбран");
+            self.name_label
+                .set_label(crate::i18n::tr("Сервер не выбран", "No server selected"));
             self.name_label.add_css_class("empty");
         } else {
             self.name_label.set_label(&name);
@@ -555,9 +613,9 @@ impl Window {
 
         let connected = matches!(status, Status::Connected { .. });
         self.connect_button.set_label(if connected {
-            "Отключить"
+            crate::i18n::tr("Отключить", "Disconnect")
         } else {
-            "Подключить"
+            crate::i18n::tr("Подключить", "Connect")
         });
         if connected {
             self.connect_button.add_css_class("live");
@@ -591,12 +649,18 @@ impl Window {
         let profiles = match self.state.store.borrow().profiles(Some(gid)) {
             Ok(p) => p,
             Err(e) => {
-                self.toast(&format!("Не удалось прочитать список: {e}"));
+                self.toast(&crate::tr_format!(
+                    "Не удалось прочитать список: {e}",
+                    "Could not read the list: {e}"
+                ));
                 return;
             }
         };
         if profiles.is_empty() {
-            self.toast("В этой группе нет серверов");
+            self.toast(crate::i18n::tr(
+                "В этой группе нет серверов",
+                "This group has no servers",
+            ));
             return;
         }
         let ids = profiles.iter().map(|p| p.id).collect();
@@ -612,26 +676,36 @@ impl Window {
     /// Asks auto-selection to recalculate its ranking right now.
     pub fn recheck_auto(self: &Rc<Self>) {
         if self.state.connected_id() >= 0 {
-            self.toast("Автовыбор сейчас не используется");
+            self.toast(crate::i18n::tr(
+                "Автовыбор сейчас не используется",
+                "Automatic selection is not currently in use",
+            ));
             return;
         }
         self.state.engine.send(Command::AutoRecheck);
-        self.toast("Перепроверяю серверы группы…");
+        self.toast(crate::i18n::tr(
+            "Перепроверяю серверы группы…",
+            "Retesting servers in the group…",
+        ));
     }
 
     /// Measures the selected server’s speed.
     pub fn start_speed_test(self: &Rc<Self>, id: i64) {
         let profile = self.state.store.borrow().profile(id).ok().flatten();
         let Some(profile) = profile else {
-            self.toast("Сервер не найден");
+            self.toast(crate::i18n::tr("Сервер не найден", "Server not found"));
             return;
         };
         let settings = self.state.settings.borrow().clone();
         if !settings.speed_test_download && !settings.speed_test_upload {
-            self.toast("В настройках выключены и приём, и отдача — мерить нечего");
+            self.toast(crate::i18n::tr(
+                "В настройках выключены и приём, и отдача — мерить нечего",
+                "Download and upload tests are both disabled in settings — nothing to measure",
+            ));
             return;
         }
-        self.servers.set_speed_progress(id, "замеряю…");
+        self.servers
+            .set_speed_progress(id, crate::i18n::tr("замеряю…", "measuring…"));
         self.state.engine.send(Command::SpeedTest {
             profile: Box::new(profile),
             id,
@@ -667,12 +741,18 @@ fn mode_switch(vpn: bool) -> (gtk::Box, gtk::ToggleButton, gtk::ToggleButton) {
         .build();
 
     let proxy = gtk::ToggleButton::builder()
-        .label("Прокси")
-        .tooltip_text("Только приложения, настроенные на локальный порт")
+        .label(crate::i18n::tr("Прокси", "Proxy"))
+        .tooltip_text(crate::i18n::tr(
+            "Только приложения, настроенные на локальный порт",
+            "Only applications configured to use the local port",
+        ))
         .build();
     let vpn_button = gtk::ToggleButton::builder()
         .label("VPN")
-        .tooltip_text("Весь трафик системы через TUN-интерфейс")
+        .tooltip_text(crate::i18n::tr(
+            "Весь трафик системы через TUN-интерфейс",
+            "All system traffic through a TUN interface",
+        ))
         .group(&proxy)
         .build();
 
@@ -690,22 +770,58 @@ fn gio_menu() -> gtk::gio::Menu {
     let menu = gtk::gio::Menu::new();
 
     let section = gtk::gio::Menu::new();
-    section.append(Some("Добавить серверы"), Some("app.add"));
-    section.append(Some("Проверить задержки"), Some("app.test"));
-    section.append(Some("Замерить скорость"), Some("app.speed-test"));
-    section.append(Some("Перепроверить автовыбор"), Some("app.auto-recheck"));
-    section.append(Some("Обновить подписку"), Some("app.update-subscription"));
+    section.append(
+        Some(crate::i18n::tr("Добавить серверы", "Add servers")),
+        Some("app.add"),
+    );
+    section.append(
+        Some(crate::i18n::tr("Проверить задержки", "Test latency")),
+        Some("app.test"),
+    );
+    section.append(
+        Some(crate::i18n::tr("Замерить скорость", "Test speed")),
+        Some("app.speed-test"),
+    );
+    section.append(
+        Some(crate::i18n::tr(
+            "Перепроверить автовыбор",
+            "Retest automatic selection",
+        )),
+        Some("app.auto-recheck"),
+    );
+    section.append(
+        Some(crate::i18n::tr("Обновить подписку", "Update subscription")),
+        Some("app.update-subscription"),
+    );
     menu.append_section(None, &section);
 
     let section = gtk::gio::Menu::new();
-    section.append(Some("Правила маршрутизации"), Some("app.routes"));
-    section.append(Some("Импорт из Throne"), Some("app.import"));
-    section.append(Some("Проверить конфигурацию"), Some("app.check-config"));
+    section.append(
+        Some(crate::i18n::tr("Правила маршрутизации", "Routing rules")),
+        Some("app.routes"),
+    );
+    section.append(
+        Some(crate::i18n::tr("Импорт из Throne", "Import from Throne")),
+        Some("app.import"),
+    );
+    section.append(
+        Some(crate::i18n::tr(
+            "Проверить конфигурацию",
+            "Check configuration",
+        )),
+        Some("app.check-config"),
+    );
     menu.append_section(None, &section);
 
     let section = gtk::gio::Menu::new();
-    section.append(Some("Настройки"), Some("app.preferences"));
-    section.append(Some("О программе"), Some("app.about"));
+    section.append(
+        Some(crate::i18n::tr("Настройки", "Settings")),
+        Some("app.preferences"),
+    );
+    section.append(
+        Some(crate::i18n::tr("О программе", "About")),
+        Some("app.about"),
+    );
     menu.append_section(None, &section);
 
     menu

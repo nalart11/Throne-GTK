@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/ipc", "crates/config", "crates/store", "crates/app"]
+members = ["crates/ipc", "crates/config", "crates/store", "crates/app", "crates/macos-bridge"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/nalart/throne-gtk"

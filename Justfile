@@ -68,14 +68,26 @@ dmg:
 # administrator prompt. It is intended for personal use without Developer ID.
 [group('packaging')]
 installer: dmg
-    ./scripts/package-macos-installer.sh
+    ./scripts/package-macos-installer.sh --dev-manual
 
-# Build the interface (Rust, GTK4) [set RELEASE=1 to enable release build]
+# Developer ID application/installer identities and notary Keychain profile required.
+[group('packaging')]
+installer-release: dmg
+    ./scripts/package-macos-installer.sh --release
+
+# Build the interface (native Swift on Darwin, GTK elsewhere)
 [group('build')]
 build-app:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p build
+    if [[ "$(go env GOOS)" == "darwin" ]]; then
+        ./native/macos/build.sh
+        install -m755 native/macos/.build/throne-gtk build/throne-gtk
+        mkdir -p build/Resources
+        cp -R native/macos/.build/Resources/. build/Resources/
+        exit 0
+    fi
     suffix=""
     [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
     cargo build {{ if RELEASE == "true" { "--release" } }} -p throne-app
@@ -117,13 +129,26 @@ fetch-cronet:
     fi
 
     mkdir -p build
-    cp "$library" "build/${library_name}"
+    # Go module-cache libraries are read-only; keep repeated builds writable.
+    install -m 644 "$library" "build/${library_name}"
     echo "${library_name} → build/"
 
 # Tests
 [group('test')]
 test:
-    cargo test --workspace
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        cargo test --workspace --exclude throne-app
+        ./native/macos/verify-frontend.sh
+    else
+        cargo test --workspace
+    fi
+
+# Optional GTK frontend tests, including on macOS with GTK installed.
+[group('test')]
+test-gtk:
+    cargo test -p throne-app
 
 # End-to-end check with real data: import from Throne and validate configs with the core.
 # The binary is copied under the name throne-gtk — the core does not accept another parent.
@@ -138,6 +163,21 @@ selftest:
     cp "target/debug/examples/selftest${suffix}" "target/selftest/throne-gtk${suffix}"
     cp "build/throne-gtk-core${suffix}" target/selftest/
     "./target/selftest/throne-gtk${suffix}"
+
+# Loopback-only IPC/lifecycle smoke; uses the existing core without rebuilding Go.
+[group('test')]
+ipc-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suffix=""
+    [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && suffix=".exe"
+    cargo build --example ipc_smoke -p throne-app
+    test -x "target/debug/examples/ipc_smoke${suffix}"
+    test -x "build/throne-gtk-core${suffix}"
+    mkdir -p target/ipc-smoke
+    cp "target/debug/examples/ipc_smoke${suffix}" "target/ipc-smoke/throne-gtk${suffix}"
+    cp "build/throne-gtk-core${suffix}" "target/ipc-smoke/throne-gtk-core${suffix}"
+    "./target/ipc-smoke/throne-gtk${suffix}"
 
 # Clean build data
 clean:
