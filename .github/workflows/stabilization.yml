@@ -71,6 +71,9 @@ jobs:
       - name: Test macOS packaging guards (portable)
         run: bash scripts/test-macos-packaging.sh
 
+      - name: Test release installer (isolated fixtures, no installation)
+        run: bash scripts/test-install.sh
+
       - name: Test Rust workspace
         run: just test
 

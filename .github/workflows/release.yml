@@ -89,6 +89,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test portable macOS packaging guards
         run: bash scripts/test-macos-packaging.sh
+      - name: Test release installer (isolated fixtures, no installation)
+        run: bash scripts/test-install.sh
       - name: Test Linux packaging fixtures
         if: runner.os == 'Linux'
         run: bash scripts/test-linux-packaging.sh

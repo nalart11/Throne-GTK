@@ -69,13 +69,33 @@ Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscri
 | Linux | GTK4 / libadwaita | VPN requires TUN capabilities. Tray support depends on a StatusNotifierItem host. |
 | Windows | GTK4 / libadwaita | Current source-build instructions use MSYS2 MinGW64. VPN requires administrator privileges; tray support is disabled. |
 
-**This project is under active development.** The native frontend targets macOS 13+, but the actual app minimum is the higher deployment target of its GUI and core. The current packaged core requires **macOS 27.0**; check the requirements of the package you use.
+**This project is under active development.** The published v0.2.1 macOS package requires **Apple Silicon and macOS 15.0+**. Source builds may have a different minimum: packaging uses the higher deployment target of the GUI and core.
 
 ## Installation
 
+### Install from a release (Linux / macOS)
+
+Download the installer, review it, then run it as your normal user, **not with `sudo`**:
+
+```sh
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  https://raw.githubusercontent.com/nalart11/Throne-GTK/main/scripts/install.sh \
+  --output install-throne.sh
+# Review install-throne.sh before running it.
+bash install-throne.sh                        # Linux
+# macOS: explicitly accept the testing, unsigned/unnotarized PKG:
+bash install-throne.sh --allow-unsigned-macos
+```
+
+The default is the latest stable release; use `--version 0.2.1` to pin a version, `--prefix "$HOME/.local"` to change the Linux destination, or `--help` for options. Close Throne GTK before installing or updating. The script checks the asset against the release's `SHA256SUMS` before installation. This detects corruption, not compromise of the release account; it is not a publisher signature. It never builds from source, disables Gatekeeper, or starts the app.
+
+Linux releases currently support **x86_64, glibc ≥ 2.39, GTK ≥ 4.12 and libadwaita ≥ 1.5**. The installer needs `curl` and Python 3, installs under `~/.local` without administrator access, and does **not** grant VPN capabilities automatically. Keep `~/.local/bin` on your `PATH`. macOS releases currently support **Apple Silicon, macOS 15.0+**; the PKG installs the VPN helper and requests administrator authorization only for the system installer. `--yes` does not replace `--allow-unsigned-macos`.
+
+From an existing checkout, use `bash scripts/install.sh` with the same options instead of downloading the script.
+
 ### macOS
 
-See [Releases](https://github.com/nalart11/Throne-GTK/releases) for available packages. The published v0.1.0 asset is a local-use **PKG installer**, not a Developer ID–signed/notarized public distribution. Only install a package whose source you trust; do not disable system-wide security protections. README screenshots may show development changes newer than that release.
+See [Releases](https://github.com/nalart11/Throne-GTK/releases) for available packages. The v0.2.1 macOS assets are **testing packages**, not Developer ID–signed/notarized public distributions. Only install a package whose source you trust; do not disable system-wide security protections.
 
 For a build from this checkout:
 
@@ -97,7 +117,16 @@ On the Service Management installation path, macOS may require approval in **Sys
 
 ### Linux
 
-Build from source, then install for your user:
+For VPN after a release installation, optionally grant privileges to the **installed core**, only if you trust it:
+
+```sh
+sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep \
+  "$HOME/.local/lib/throne-gtk/throne-gtk-core"
+```
+
+Adjust the path for a custom prefix and repeat after each update. Proxy mode needs no capabilities. These privileges allow the core to alter networking; the installer never grants them itself.
+
+For installation from source instead of a release:
 
 ```sh
 just install
