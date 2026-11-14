@@ -4,11 +4,21 @@ set -eu
 base='/Library/Application Support/Throne GTK'
 app="$base/Throne GTK.app"
 label=dev.nalart.ThroneGtk.helper
+run="$base/run"
+# Never follow a redirected runtime directory or replace its persistent lock.
+if [ -e "$run" ] || [ -L "$run" ]; then
+    [ -d "$run" ] && [ ! -L "$run" ] || { echo 'Unsafe helper run directory' >&2; exit 1; }
+else
+    (umask 077; /bin/mkdir "$run")
+fi
 # Only our private subtree is changed; never chmod shared ancestors.
 /usr/sbin/chown -R root:wheel "$base"
 /bin/chmod -RN "$base"
 /bin/chmod -R go-w "$base"
 /bin/chmod 755 "$base" "$app" "$app/Contents/MacOS/throne-gtk" "$app/Contents/MacOS/throne-gtk-core"
+/usr/sbin/chown root:wheel "$run"
+/bin/chmod -N "$run"
+/bin/chmod 755 "$run"
 link='/Applications/Throne GTK.app'
 if [ ! -e "$link" ] && [ ! -L "$link" ]; then
     /bin/ln -s "$app" "$link"

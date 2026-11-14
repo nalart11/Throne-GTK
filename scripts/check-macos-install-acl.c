@@ -50,6 +50,22 @@ static int safe_acl(const char *path) {
 static int safe_node(const char *path, const char *tree) {
     struct stat st;
     if (lstat(path, &st) || st.st_uid != 0) return -1;
+    if (tree) {
+        char run[PATH_MAX];
+        if (snprintf(run, sizeof(run), "%s/run", tree) >= (int)sizeof(run)) return -1;
+        if (!strcmp(path, run) && !S_ISDIR(st.st_mode)) return -1;
+        if (!strncmp(path, run, strlen(run)) && path[strlen(run)] == '/' && S_ISLNK(st.st_mode)) return -1;
+    }
+    if (S_ISSOCK(st.st_mode) && tree) {
+        char endpoint[PATH_MAX], parent[PATH_MAX];
+        if (snprintf(endpoint, sizeof(endpoint), "%s/run/helper.sock", tree) >= (int)sizeof(endpoint) ||
+            strcmp(path, endpoint) ||
+            snprintf(parent, sizeof(parent), "%s/run", tree) >= (int)sizeof(parent)) return -1;
+        /* Only this public control leaf may be writable. No subtree exemption:
+         * its real parent and every other tree node retain the generic policy. */
+        if (lstat(parent, &st) || !S_ISDIR(st.st_mode) || safe_node(parent, NULL)) return -1;
+        return safe_acl(path);
+    }
     if (S_ISLNK(st.st_mode)) {
         char resolved[PATH_MAX];
         if (!tree || !realpath(path, resolved) ||

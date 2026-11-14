@@ -27,9 +27,14 @@ The GUI endpoint must live in a private user-owned directory without extended
 ACLs; only the macOS `/var` prefix alias is accepted. The public helper socket
 is discoverable (0666), but every request requires the above authentication.
 Only the holder of a verified root-owned singleton lock in protected
-`/private/var/run` may recover an existing root-owned socket. Recovery requires
+`/Library/Application Support/Throne GTK/run/helper.lock` (0600) may recover
+`/Library/Application Support/Throne GTK/run/helper.sock`. The PKG creates the
+real root:wheel 0755, ACL-free `run` directory; missing or unsafe runtime
+directories require PKG repair, never automatic repair or a legacy fallback.
+Recovery requires
 connection refusal and an unchanged inode; live listeners, foreign files and
-ambiguous failures are never removed. The permanent lock file is never unlinked.
+ambiguous failures are never removed. The permanent lock file is never unlinked
+during startup or upgrade; uninstall removes it only after stop and DNS recovery.
 
 SMAppService still registers the daemon from the protected main bundle in
 release mode. Development PKGs explicitly use manual launchd registration of
