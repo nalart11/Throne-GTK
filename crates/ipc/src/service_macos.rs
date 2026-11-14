@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
-const HELPER_SOCKET: &str = "/var/run/dev.nalart.ThroneGtk.helper.sock";
+const HELPER_SOCKET: &str = "/Library/Application Support/Throne GTK/run/helper.sock";
 const BUNDLE: &str = "/Library/Application Support/Throne GTK/Throne GTK.app";
 const CORE: &str =
     "/Library/Application Support/Throne GTK/Throne GTK.app/Contents/MacOS/throne-gtk-core";
@@ -57,6 +57,7 @@ async fn start_inner(endpoint: &Path, debug: bool) -> Result<u32> {
     // Service Management registration path.
     // Check installation before registering or sending anything to a daemon.
     validate_installation()?;
+    validate_helper_parent()?;
     // Registration is allowed only when no endpoint exists, never after peer
     // authentication or trust-policy failure.
     let mut stream = match tokio::net::UnixStream::connect(HELPER_SOCKET).await {
@@ -231,12 +232,19 @@ fn validate_installation() -> Result<()> {
     Ok(())
 }
 
+fn validate_helper_parent() -> Result<()> {
+    let parent = Path::new(HELPER_SOCKET).parent().unwrap();
+    protected_ancestors(parent)
+        .context("Install or repair the protected helper run directory using the PKG")?;
+    if !std::fs::symlink_metadata(parent)?.is_dir() {
+        bail!("Repair the helper run directory using the PKG: not a directory");
+    }
+    Ok(())
+}
+
 fn validate_helper_endpoint() -> Result<PathBuf> {
-    // /var is a system symlink on macOS. Canonicalize only the parent and then
-    // validate each actual ancestor; never follow a socket-leaf symlink.
-    let parent = PathBuf::from("/private/var/run");
-    protected_ancestors(&parent)?;
-    let endpoint = parent.join(Path::new(HELPER_SOCKET).file_name().unwrap());
+    validate_helper_parent()?;
+    let endpoint = PathBuf::from(HELPER_SOCKET);
     protected_node(&endpoint, true)?;
     Ok(endpoint)
 }

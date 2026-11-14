@@ -3,7 +3,21 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 python3 - "$root" <<'PY'
-import os, pathlib, plistlib, shutil, subprocess, sys, tempfile
+import os, pathlib, plistlib, re, shutil, socket, subprocess, sys, tempfile
+def bind_fixture_socket(control, path):
+    # macOS temporary-directory prefixes can exceed sun_path even for a short
+    # fixture leaf. Bind relative to its private parent, restoring cwd on error.
+    assert len(os.fsencode(path.name)) <= 103
+    previous = os.open('.', os.O_RDONLY)
+    try:
+        os.chdir(path.parent)
+        control.bind(path.name)
+    finally:
+        try:
+            os.fchdir(previous)
+        finally:
+            os.close(previous)
+
 r = pathlib.Path(sys.argv[1])
 fixed = '/Library/Application Support/Throne GTK/Throne GTK.app'
 with (r/'resources/macos/dev.nalart.ThroneGtk.manual-helper.plist').open('rb') as f:
@@ -15,6 +29,17 @@ with (r/'resources/macos/installer/components.plist').open('rb') as f:
     assert plistlib.load(f)[0]['RootRelativeBundlePath'] == fixed.lstrip('/')
 pre = (r/'resources/macos/installer/preinstall').read_text()
 post = (r/'resources/macos/installer/postinstall').read_text()
+go = (r/'core/helper_darwin.go').read_text()
+rust = (r/'crates/ipc/src/service_macos.rs').read_text()
+runtime = '/Library/Application Support/Throne GTK/run/'
+assert re.search(r'const helperSocket = "([^"]+)"', go)[1] == runtime+'helper.sock'
+assert re.search(r'const HELPER_SOCKET: &str = "([^"]+)"', rust)[1] == runtime+'helper.sock'
+assert 'const path = "'+runtime+'helper.lock"' in go
+assert 'run="$base/run"' in post and '/bin/mkdir "$run"' in post
+assert '/bin/rm' not in post and 'chmod 755 "$run"' in post
+assert all(len((runtime+leaf).encode()) + 1 <= 104 for leaf in ('helper.sock', 'helper.lock'))
+assert rust.index('validate_helper_parent()?;') < rust.index('UnixStream::connect(HELPER_SOCKET)')
+assert 'Path::new(HELPER_SOCKET).parent()' in rust
 pkg = (r/'scripts/package-macos-installer.sh').read_text()
 assert 'Foreign install directory' in pre and 'Legacy or foreign /Applications' in pre
 assert 'bootout is NOT unregister' in pre
@@ -67,6 +92,7 @@ assert '/bin/launchctl bootout' not in post
 uninstall = (r/'scripts/uninstall-macos.sh').read_text()
 assert uninstall.index('/bin/launchctl bootout') < uninstall.index('/bin/rm "$plist"')
 assert uninstall.index('"$acl_check" --tree') < uninstall.index('"$app/Contents/MacOS/throne-gtk-core" --recover-dns') < uninstall.index('/bin/rm "$plist"')
+assert uninstall.index('--recover-dns') < uninstall.index('/bin/rm -f "$base/run/helper.sock" "$base/run/helper.lock"')
 assert pre.index('/bin/launchctl bootout') < pre.index('"$app/Contents/MacOS/throne-gtk-core" --recover-dns')
 for source in (pre, uninstall):
     assert 'bootout "system/$label" || fail' in source
@@ -201,10 +227,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert result.returncode != 0
     assert events.read_text() == 'stop\nrecover\n'
     assert plist.exists() and core.exists() and (base/'.throne-gtk-package').exists()
+    run = base/'run'
+    run.mkdir()
+    (run/'helper.lock').touch()
+    control = socket.socket(socket.AF_UNIX)
+    bind_fixture_socket(control, run/'helper.sock')
     result = subprocess.run(['bash', str(uninstaller)], env=env, stderr=subprocess.DEVNULL)
     assert result.returncode == 0
     assert events.read_text().startswith('stop\nrecover\nrecover\nremove\n')
     assert not plist.exists() and not core.exists() and not base.exists()
+    control.close()
     preflight(False, acl_fail='--ancestors')
     assert not base.exists()
     acl_events.write_text('')
@@ -212,6 +244,56 @@ with tempfile.TemporaryDirectory() as tmp:
     assert base.is_dir()
     checks = acl_events.read_text()
     assert checks.index('--ancestors') < checks.index('chmod -N') < checks.index('chmod 755') < checks.index('--tree')
+with tempfile.TemporaryDirectory() as tmp:
+    # Execute the production tree/type/mode walker on Linux with ONLY the
+    # Darwin ACL reader stubbed. Native ACL behavior still requires macOS.
+    fixture = pathlib.Path(tmp)
+    source = (r/'scripts/check-macos-install-acl.c').read_text()
+    source = source.replace('#include <sys/acl.h>', '')
+    source = source.replace('#include "acl_policy.h"', '').replace('#include "../core/internal/sys/acl_presence.h"', '')
+    start, end = source.index('static int safe_acl('), source.index('static int safe_node(')
+    source = source[:start] + 'static int safe_acl(const char *p) { return getenv("UNSAFE_ACL") ? -1 : 0; }\n' + source[end:]
+    # Map fixture owner to root for nonroot CI; ownership rejection is separately
+    # exercised by changing the expected uid in a second compiled copy.
+    source = source.replace('st.st_uid != 0', 'st.st_uid != '+str(os.getuid()))
+    c, binary = fixture/'walker.c', fixture/'walker'
+    c.write_text(source)
+    subprocess.run(['cc', str(c), '-o', str(binary)], check=True)
+    tree = fixture/'base'
+    (tree/'run').mkdir(parents=True)
+    def check(valid, **env):
+        result = subprocess.run([str(binary), '--tree', str(tree)], env=dict(os.environ, **env), stderr=subprocess.DEVNULL)
+        assert (result.returncode == 0) == valid
+    with socket.socket(socket.AF_UNIX) as control:
+        bind_fixture_socket(control, tree/'run/helper.sock')
+        (tree/'run/helper.sock').chmod(0o666)
+        check(True)
+        # Inject a foreign owner for only the socket, retaining the exact
+        # production ownership check (no chown/root privileges needed).
+        foreign = fixture/'foreign.c'
+        foreign.write_text(source.replace('if (lstat(path, &st) ||',
+            'if (lstat(path, &st)) return -1; if (strstr(path, "/helper.sock")) st.st_uid = '+str(os.getuid()+1)+'; if ('))
+        foreign_binary = fixture/'foreign'
+        subprocess.run(['cc', str(foreign), '-o', str(foreign_binary)], check=True)
+        assert subprocess.run([str(foreign_binary), '--tree', str(tree)], stderr=subprocess.DEVNULL).returncode != 0
+        check(False, UNSAFE_ACL='1')
+        (tree/'run').chmod(0o775)
+        check(False)  # Generic writable-directory policy is not weakened.
+        (tree/'run').chmod(0o755)
+        with socket.socket(socket.AF_UNIX) as other:
+            bind_fixture_socket(other, tree/'other.sock')
+            check(False)
+        (tree/'other.sock').unlink()
+        (tree/'run/helper.sock').unlink()
+        (tree/'run/helper.sock').symlink_to('/dev/null')
+        check(False)
+        (tree/'run/helper.sock').unlink()
+        os.mkfifo(tree/'fifo')
+        check(False)
+        (tree/'fifo').unlink()
+        (tree/'run').rename(tree/'real-run')
+        (tree/'run').symlink_to('real-run')
+        check(False)
 with tempfile.TemporaryDirectory() as tmp:
     # Compile the exact shared portable ACL decision, without Darwin headers.
     compiler = shutil.which('cc')

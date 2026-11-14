@@ -19,7 +19,7 @@ if [ -e "$base" ] || [ -L "$base" ]; then
     [ ! -L "$base" ] && [ -f "$base/.throne-gtk-package" ] && [ ! -L "$base/.throne-gtk-package" ] || fail "Foreign install directory: $base"
     [ "$(/usr/bin/stat -f %u "$base")" = 0 ] || fail "Install directory is not root-owned"
     [ "$(/bin/cat "$base/.throne-gtk-package")" = "$(/bin/cat "$(dirname "$0")/mode")" ] || fail "Changing service mode requires explicit uninstall and user-context SMAppService unregister first."
-    [ -z "$(/usr/bin/find "$base" ! -type l \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail "Existing installation is not root-protected"
+    [ -z "$(/usr/bin/find "$base" ! -type l ! \( -path "$base/run/helper.sock" -type s -user root \) \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail "Existing installation is not root-protected"
 fi
 if [ -e "$app" ] || [ -L "$app" ]; then
     [ ! -L "$app" ] || fail "Bundle is a symlink"

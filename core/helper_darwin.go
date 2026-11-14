@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const helperSocket = "/var/run/dev.nalart.ThroneGtk.helper.sock"
+const helperSocket = "/Library/Application Support/Throne GTK/run/helper.sock"
 
 var admissions = make(chan struct{}, 16)
 var workers = struct {
@@ -104,7 +104,7 @@ func runHelper() {
 	if err := validateHelper(); err != nil {
 		log.Fatal("untrusted helper installation: ", err)
 	}
-	if err := helpertrust.CheckAncestors("/private/var/run", helpertrust.CheckNoACL); err != nil {
+	if err := helpertrust.CheckAncestors(filepath.Dir(helperSocket), helpertrust.CheckNoACL); err != nil {
 		log.Fatal("untrusted helper socket directory: ", err)
 	}
 	if err := os.Chdir("/"); err != nil {
@@ -239,7 +239,7 @@ func recoverHelperDNS() {
 // The caller has already verified every ancestor of this fixed path. O_NOFOLLOW
 // and post-open inode/ownership checks prevent trusting a substituted lock file.
 func lockHelperEndpoint() (*os.File, error) {
-	const path = "/private/var/run/dev.nalart.ThroneGtk.helper.lock"
+	const path = "/Library/Application Support/Throne GTK/run/helper.lock"
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
 	if err != nil {
 		return nil, err

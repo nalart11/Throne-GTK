@@ -41,7 +41,7 @@ for dir in /Library '/Library/Application Support' "$base" "$app" /Applications 
 done
 [ -f "$base/.throne-gtk-package" ] && [ ! -L "$base/.throne-gtk-package" ] || fail 'Missing ownership marker'
 [ "$(/usr/bin/stat -f %u "$base")" = 0 ] || fail 'Not root-owned'
-[ -z "$(/usr/bin/find "$base" ! -type l \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail 'Installation is not root-protected'
+[ -z "$(/usr/bin/find "$base" ! -type l ! \( -path "$base/run/helper.sock" -type s -user root \) \( ! -user root -o -perm -002 -o -perm -020 \) -print)" ] || fail 'Installation is not root-protected'
 /usr/bin/codesign --verify --deep --strict "$app" || fail 'Invalid app signature'
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = dev.nalart.ThroneGtk ] || fail 'Foreign bundle'
 if [ ! -f "$base/.throne-gtk-manual" ]; then
@@ -61,6 +61,10 @@ elif /bin/launchctl print "system/$label" >/dev/null 2>&1; then
     fail 'SMAppService is still registered. Unregister through the app as the logged-in user, not as root; bootout is not unregister.'
 fi
 "$app/Contents/MacOS/throne-gtk-core" --recover-dns || fail 'DNS recovery failed or is busy/conflicted; all installed artifacts preserved'
+# Only after the service is stopped and recovery succeeds may its permanent
+# singleton inode be removed. Preserve unknown runtime files.
+/bin/rm -f "$base/run/helper.sock" "$base/run/helper.lock"
+/bin/rmdir "$base/run" 2>/dev/null || true
 if [ -e "$plist" ]; then
     /bin/rm "$plist"
 fi
