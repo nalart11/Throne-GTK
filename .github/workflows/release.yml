@@ -1,0 +1,194 @@
+name: Release packages (draft)
+
+on:
+  push:
+    tags: ['v*']
+  # Select an existing version tag in the Run workflow ref picker.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate and package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      GOTOOLCHAIN: go1.26.0
+      RELEASE: '1'
+      # Explicit ad-hoc application signing, unsigned PKG; no credentials.
+      CODESIGN_IDENTITY: '-'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag, version, and architecture
+        run: |
+          [[ "$GITHUB_REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || {
+            echo 'Run this workflow only against an existing vMAJOR.MINOR.PATCH tag' >&2; exit 1;
+          }
+          version="${BASH_REMATCH[1]}"
+          python3 - "$version" <<'PY'
+          import re, sys
+          text = open('Cargo.toml').read()
+          assert re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)[1] == sys.argv[1], 'Tag and workspace version differ'
+          PY
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            [[ "$(uname -m)" == x86_64 ]]
+          else
+            [[ "$(uname -m)" == arm64 ]]
+          fi
+          echo "THRONE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config protobuf-compiler libgtk-4-dev libadwaita-1-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install pkgconf protobuf gtk4 libadwaita dylibbundler librsvg
+
+      - name: Verify dependency versions
+        run: |
+          pkg-config --atleast-version=4.12 gtk4
+          pkg-config --atleast-version=1.5 libadwaita-1
+          pkg-config --modversion gtk4 libadwaita-1
+          protoc --version
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache-dependency-path: core/go.sum
+
+      - name: Install Just
+        run: cargo install just --locked
+
+      # Repeat the stabilization gates on this exact tag, not a different ref's
+      # possibly successful run. No continue-on-error on any release gate.
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Test portable macOS packaging guards
+        run: bash scripts/test-macos-packaging.sh
+      - name: Test Linux packaging fixtures
+        if: runner.os == 'Linux'
+        run: bash scripts/test-linux-packaging.sh
+      - name: Test Rust workspace and native frontend
+        run: just test
+      - name: Check Rust with Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Test Go core
+        working-directory: core
+        run: go test ./...
+      - name: Vet Go core
+        working-directory: core
+        run: go vet ./...
+      - name: Build shipped core and application
+        run: just build
+      - name: Exercise isolated IPC and loopback proxy
+        run: just ipc-smoke
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release-assets
+          THRONE_PACKAGE_OUT="$PWD/release-assets" bash scripts/package-linux.sh
+          # Record loader resolution and fail if this runner lacks a dependency.
+          for binary in build/throne-gtk build/throne-gtk-core build/libcronet.so; do
+            ldd "$binary" > "$RUNNER_TEMP/ldd.txt"
+            cat "$RUNNER_TEMP/ldd.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/ldd.txt"; then exit 1; fi
+          done
+
+      - name: Package macOS testing DMG and local-use PKG
+        if: runner.os == 'macOS'
+        run: |
+          ./scripts/package-macos.sh
+          ./scripts/package-macos-installer.sh --dev-manual
+          mkdir -p release-assets
+          cp dist/throne-gtk-macos.dmg "release-assets/throne-gtk-${THRONE_VERSION}-macos-arm64-testing.dmg"
+          cp dist/throne-gtk-local-installer.pkg "release-assets/throne-gtk-${THRONE_VERSION}-macos-arm64-testing-local.pkg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Assemble draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify exact asset set and generate checksums
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          cd release-assets
+          test "$(find . -type f | wc -l)" -eq 3
+          test -s "throne-gtk-${version}-linux-x86_64.tar.gz"
+          test -s "throne-gtk-${version}-macos-arm64-testing.dmg"
+          test -s "throne-gtk-${version}-macos-arm64-testing-local.pkg"
+          sha256sum -- * > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Create draft only (never auto-publish or overwrite)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Linux x86_64 + experimental macOS arm64 testing packages.
+
+          Linux: built on Ubuntu 24.04 (glibc 2.39 baseline). Requires GTK >= 4.12,
+          libadwaita >= 1.5 and their system runtime dependencies (Ubuntu 24.04:
+          libgtk-4-1, libadwaita-1-0, libc6, libgcc-s1 and the Cronet runtime
+          dependencies). Not a fully static or universal Linux build. The archive
+          has a single versioned root, lib/throne-gtk/{throne-gtk,throne-gtk-core,
+          libcronet.so}, icons and a desktop template; @EXEC@ needs an absolute
+          installation path. No capabilities or system configuration are changed.
+
+          macOS TESTING ONLY: no Developer ID signature and no notarization.
+          App/core carry ad-hoc signatures for bundle integrity only; the DMG and
+          local-use PKG are unsigned. Gatekeeper may reject them. No security
+          bypass is provided or recommended. PKG uses --dev-manual and installs
+          the privileged local helper with an administrator prompt; it is not a
+          production signed installer. Minimum macOS is recorded in the bundle.
+
+          SHA256SUMS covers all three assets. CI build/test/package gates passed;
+          human review and actual Linux/macOS installation testing are still
+          required before publishing this draft. No installer was executed in CI.
+          NOTES
+          gh release create "$TAG" release-assets/* --verify-tag --draft \
+            --title "Throne GTK $TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
