@@ -2,6 +2,7 @@
 
 mod engine;
 mod format;
+mod i18n;
 mod logbridge;
 mod paths;
 mod state;
@@ -58,10 +59,20 @@ fn main() -> glib::ExitCode {
         .with(logbridge::LogBridge::new(events_tx.clone()))
         .init();
 
+    let startup = Store::open(&paths::database()).and_then(|store| {
+        let settings = store.settings()?;
+        i18n::init(settings.language);
+        Ok(())
+    });
+
     // Start tray setup before creating the window. Linux registers it from a
     // worker thread; macOS completes it on the first main-loop iteration.
     let (actions_tx, actions_rx) = async_channel::unbounded::<tray::Action>();
-    let tray = tray::start(actions_tx);
+    let tray = if startup.is_ok() {
+        Some(tray::start(actions_tx))
+    } else {
+        None
+    };
 
     let app = adw::Application::builder()
         .application_id(APP_ID)
@@ -75,6 +86,11 @@ fn main() -> glib::ExitCode {
         let actions_rx = actions_rx.clone();
         let tray = tray.clone();
         move |app| {
+            if let Err(error) = &startup {
+                show_fatal(app, &format!("{error:#}"));
+                return;
+            }
+            let tray = tray.as_ref().expect("successful startup has a tray");
             // A second activate call (launching from the application list while
             // the program is already running) must not create a second window
             // and a second core. Search among all windows, not just active ones:
@@ -124,7 +140,10 @@ fn build(
     register_actions(app, &window);
 
     if !core_bin.exists() {
-        window.toast("Ядро не найдено — соберите его через just build");
+        window.toast(crate::i18n::tr(
+            "Ядро не найдено — соберите его через just build",
+            "Core not found — build it with just build",
+        ));
         tracing::error!("ядро не найдено: {}", core_bin.display());
     }
 
@@ -245,7 +264,10 @@ fn register_actions(app: &adw::Application, window: &Rc<ui::Window>) {
         Box::new(|w| {
             let id = w.state().selected_id.get();
             if id == 0 {
-                w.toast("Сначала выберите сервер");
+                w.toast(crate::i18n::tr(
+                    "Сначала выберите сервер",
+                    "Select a server first",
+                ));
             } else {
                 w.start_speed_test(id);
             }
@@ -321,10 +343,13 @@ fn load_styles() {
 /// silently exiting leaves the user with nothing but an empty screen.
 fn show_fatal(app: &adw::Application, message: &str) {
     let dialog = adw::AlertDialog::builder()
-        .heading("Не удалось запустить Throne GTK")
+        .heading(crate::i18n::tr(
+            "Не удалось запустить Throne GTK",
+            "Could not start Throne GTK",
+        ))
         .body(message)
         .build();
-    dialog.add_response("quit", "Закрыть");
+    dialog.add_response("quit", crate::i18n::tr("Закрыть", "Close"));
 
     let window = adw::ApplicationWindow::builder()
         .application(app)

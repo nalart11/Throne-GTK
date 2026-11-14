@@ -75,12 +75,19 @@ installer: dmg
 installer-release: dmg
     ./scripts/package-macos-installer.sh --release
 
-# Build the interface (Rust, GTK4) [set RELEASE=1 to enable release build]
+# Build the interface (native Swift on Darwin, GTK elsewhere)
 [group('build')]
 build-app:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p build
+    if [[ "$(go env GOOS)" == "darwin" ]]; then
+        ./native/macos/build.sh
+        install -m755 native/macos/.build/throne-gtk build/throne-gtk
+        mkdir -p build/Resources
+        cp -R native/macos/.build/Resources/. build/Resources/
+        exit 0
+    fi
     suffix=""
     [[ "$(go env GOOS)" == "windows" ]] && suffix=".exe"
     cargo build {{ if RELEASE == "true" { "--release" } }} -p throne-app
@@ -129,7 +136,19 @@ fetch-cronet:
 # Tests
 [group('test')]
 test:
-    cargo test --workspace
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        cargo test --workspace --exclude throne-app
+        ./native/macos/verify-frontend.sh
+    else
+        cargo test --workspace
+    fi
+
+# Optional GTK frontend tests, including on macOS with GTK installed.
+[group('test')]
+test-gtk:
+    cargo test -p throne-app
 
 # End-to-end check with real data: import from Throne and validate configs with the core.
 # The binary is copied under the name throne-gtk — the core does not accept another parent.

@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use crate::i18n::tr;
 use crate::state::State;
 
 pub struct LogsPage {
@@ -30,10 +31,15 @@ impl LogsPage {
             .build();
 
         let copy = gtk::Button::builder()
-            .label("Скопировать")
-            .tooltip_text("Скопировать журнал в буфер обмена")
+            .label(tr("Скопировать", "Copy"))
+            .tooltip_text(tr(
+                "Скопировать журнал в буфер обмена",
+                "Copy log to clipboard",
+            ))
             .build();
-        let clear = gtk::Button::builder().label("Очистить").build();
+        let clear = gtk::Button::builder()
+            .label(tr("Очистить", "Clear"))
+            .build();
 
         let toolbar = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)

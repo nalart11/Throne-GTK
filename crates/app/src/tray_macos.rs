@@ -34,8 +34,13 @@ impl Tray {
 
     pub fn set_connected(&self, name: Option<String>) {
         let tooltip = match name {
-            Some(name) => format!("Throne GTK — подключено: {name}"),
-            None => "Throne GTK — не подключено".into(),
+            Some(name) => crate::tr_format!(
+                "Throne GTK — подключено: {name}",
+                "Throne GTK — connected: {name}"
+            ),
+            None => {
+                crate::i18n::tr("Throne GTK — не подключено", "Throne GTK — disconnected").into()
+            }
         };
         if let Some(icon) = self.inner.icon.borrow().as_ref() {
             if let Err(e) = icon.set_tooltip(Some(tooltip)) {
@@ -68,9 +73,9 @@ pub fn start(actions: async_channel::Sender<Action>) -> Tray {
 
 fn build_icon(actions: async_channel::Sender<Action>) -> Result<TrayIcon, String> {
     let menu = Menu::new();
-    let show = MenuItem::new("Открыть окно", true, None);
+    let show = MenuItem::new(crate::i18n::tr("Открыть окно", "Open window"), true, None);
     let separator = PredefinedMenuItem::separator();
-    let quit = MenuItem::new("Выйти", true, None);
+    let quit = MenuItem::new(crate::i18n::tr("Выйти", "Quit"), true, None);
     menu.append_items(&[&show, &separator, &quit])
         .map_err(|e| format!("не удалось собрать меню: {e}"))?;
 
@@ -91,50 +96,45 @@ fn build_icon(actions: async_channel::Sender<Action>) -> Result<TrayIcon, String
 
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("Throne GTK — не подключено")
+        .with_tooltip(crate::i18n::tr(
+            "Throne GTK — не подключено",
+            "Throne GTK — disconnected",
+        ))
         .with_icon(template_icon()?)
         .with_icon_as_template(true)
         .build()
         .map_err(|e| e.to_string())
 }
 
-/// A 18pt crown rendered at 2x. AppKit treats its alpha channel as a template,
-/// automatically choosing the right colour for light and dark menu bars.
+/// The app's channel-line logo, rendered at 2x from the symbolic app icon.
+/// AppKit treats its alpha channel as a template, choosing the right colour
+/// for light and dark menu bars.
 fn template_icon() -> Result<Icon, String> {
     const SIZE: u32 = 36;
-    let mut rgba = vec![0_u8; (SIZE * SIZE * 4) as usize];
-    let crown = [
-        (4, 9),
-        (11, 17),
-        (18, 5),
-        (25, 17),
-        (32, 9),
-        (28, 27),
-        (8, 27),
-    ];
-
-    for y in 0..SIZE as i32 {
-        for x in 0..SIZE as i32 {
-            if inside_polygon(x, y, &crown) || (7..=29).contains(&x) && (28..=31).contains(&y) {
-                let offset = ((y as u32 * SIZE + x as u32) * 4) as usize;
-                rgba[offset + 3] = 255;
-            }
-        }
-    }
-
-    Icon::from_rgba(rgba, SIZE, SIZE).map_err(|e| e.to_string())
+    // Reproduce the asset from the canonical symbolic logo by running
+    // png="${TMPDIR:-/tmp}/throne-tray.png"
+    // rsvg-convert -w 36 -h 36 resources/icons/dev.nalart.ThroneGtk-symbolic.svg -o "$png"
+    // swift crates/app/src/generate_tray_icon.swift "$png" crates/app/src/throne_tray_icon.rgba
+    const RGBA: &[u8; SIZE as usize * SIZE as usize * 4] = include_bytes!("throne_tray_icon.rgba");
+    Icon::from_rgba(RGBA.to_vec(), SIZE, SIZE).map_err(|e| e.to_string())
 }
 
-fn inside_polygon(x: i32, y: i32, points: &[(i32, i32)]) -> bool {
-    let mut inside = false;
-    let mut previous = points.len() - 1;
-    for current in 0..points.len() {
-        let (xi, yi) = points[current];
-        let (xj, yj) = points[previous];
-        if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
-            inside = !inside;
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn template_asset_is_36px_rgba_with_template_alpha() {
+        const RGBA: &[u8; 36 * 36 * 4] = include_bytes!("throne_tray_icon.rgba");
+        let alpha = RGBA.chunks_exact(4).map(|pixel| pixel[3]);
+        let mut any_visible = false;
+        let mut any_transparent = false;
+        for value in alpha {
+            any_visible |= value > 0;
+            any_transparent |= value < 255;
         }
-        previous = current;
+        assert!(any_visible, "logo alpha must not be empty");
+        assert!(
+            any_transparent,
+            "template logo must retain transparent pixels"
+        );
     }
-    inside
 }

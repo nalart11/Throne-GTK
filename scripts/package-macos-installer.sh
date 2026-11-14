@@ -2,12 +2,14 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-app="$root/dist/Throne GTK.app"
-pkg="$root/dist/throne-gtk-local-installer.pkg"
+out="${THRONE_PACKAGE_OUT:-$root/dist}"
+app="$out/Throne GTK.app"
+pkg="$out/throne-gtk-local-installer.pkg"
 manual_plist="$root/resources/macos/dev.nalart.ThroneGtk.manual-helper.plist"
 postinstall="$root/resources/macos/installer/postinstall"
 components="$root/resources/macos/installer/components.plist"
 export COPYFILE_DISABLE=1
+export CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-${THRONE_CODESIGN_IDENTITY:--}}"
 mode="${1:-}"
 case "$mode" in
     --dev-manual) mode=manual ;;
@@ -44,11 +46,9 @@ if [[ "$mode" = release ]]; then
     }
 fi
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/throne-gtk-pkg.XXXXXX")"
-cleanup() {
-    rm -rf "$work"
-}
-trap cleanup EXIT
+mkdir -p "$out"
+work="$(mktemp -d "$out/pkg.XXXXXX")"
+# Retain uniquely scoped staging for inspection; never execute its postinstall.
 
 payload="$work/payload"
 pkg_scripts="$work/scripts"
@@ -78,7 +78,6 @@ install -m755 "$root/scripts/uninstall-macos.sh" "$base/uninstall.sh"
 
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 [[ -n "$version" ]] || version="0.1.0"
-rm -f "$pkg"
 sign_args=()
 if [[ "$mode" = release ]]; then
     sign_args=(--sign "$INSTALLER_SIGN_IDENTITY" --timestamp)
@@ -91,11 +90,13 @@ pkgbuild "${sign_args[@]}" \
     --identifier dev.nalart.ThroneGtk.local-installer \
     --version "$version" \
     --install-location / \
-    "$pkg"
+    "$work/throne-gtk-local-installer.pkg"
 if [[ "$mode" = release ]]; then
-    xcrun notarytool submit "$pkg" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$pkg"
+    xcrun notarytool submit "$work/throne-gtk-local-installer.pkg" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$work/throne-gtk-local-installer.pkg"
 fi
+[[ ! -e "$pkg" ]] || mv "$pkg" "$work/previous.pkg"
+mv "$work/throne-gtk-local-installer.pkg" "$pkg"
 
 echo "Готово: $pkg"
 echo "Установщик запросит пароль администратора один раз."

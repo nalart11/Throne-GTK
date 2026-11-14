@@ -74,6 +74,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn close_joins_owned_tasks_invalidates_clones_and_caches_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = Endpoint::create(dir.path()).unwrap();
+        let path = endpoint.path.clone();
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach_owned(stream);
+        let clone = client.clone();
+        let mut core = Core {
+            child: None,
+            _endpoint: Some(endpoint),
+            tasks,
+            closed: false,
+            close_error: None,
+            client,
+        };
+        let error = core.close(Duration::from_millis(20)).await.unwrap_err();
+        assert!(core.tasks.0.is_empty());
+        assert!(!path.parent().unwrap().exists());
+        assert!(clone.is_closed());
+        assert!(clone.query_stats().await.is_err());
+        assert_eq!(
+            format!("{error:#}"),
+            core.close(Duration::ZERO).await.unwrap_err().to_string()
+        );
+    }
+
+    #[tokio::test]
     async fn owner_drop_closes_both_halves_with_clone() {
         let dir = tempfile::tempdir().unwrap();
         let endpoint = Endpoint::create(dir.path()).unwrap();
@@ -82,7 +109,10 @@ mod tests {
         let (stream, mut peer) = UnixStream::pair().unwrap();
         let core = Core {
             child: None,
-            _endpoint: endpoint,
+            _endpoint: Some(endpoint),
+            tasks: Tasks(Vec::new()),
+            closed: false,
+            close_error: None,
             client: CoreClient::attach(stream),
         };
         let clone = core.client.clone();
@@ -332,6 +362,14 @@ struct Call {
     reply: oneshot::Sender<Result<Vec<u8>>>,
 }
 
+struct Tasks(Vec<tokio::task::JoinHandle<()>>);
+impl Drop for Tasks {
+    fn drop(&mut self) {
+        for task in &self.0 {
+            task.abort();
+        }
+    }
+}
 /// Client for one live connection to the core. Can be cloned freely.
 #[derive(Clone)]
 pub struct CoreClient {
@@ -342,7 +380,10 @@ pub struct CoreClient {
 /// The running core process together with its channel.
 pub struct Core {
     child: Option<Child>,
-    _endpoint: Endpoint,
+    _endpoint: Option<Endpoint>,
+    tasks: Tasks,
+    closed: bool,
+    close_error: Option<String>,
     pub client: CoreClient,
 }
 
@@ -443,6 +484,7 @@ impl Core {
             .create(&endpoint)
             .with_context(|| format!("создание {}", endpoint.display()))?;
 
+        let mut tasks = Tasks(Vec::new());
         let mut child;
         let expected_pid;
         if privileged {
@@ -467,7 +509,7 @@ impl Core {
                     return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
                 }
             };
-            pipe_core_logs(&mut spawned);
+            tasks.0.extend(pipe_core_logs(&mut spawned));
             expected_pid = spawned.id();
             child = Some(spawned);
         }
@@ -493,13 +535,13 @@ impl Core {
             Ok(Ok(stream)) => stream,
             Ok(Err(e)) => {
                 if let Some(child) = child.as_mut() {
-                    let _ = child.kill().await;
+                    let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
                 }
                 return Err(e).context("accept от ядра");
             }
             Err(_) => {
                 if let Some(child) = child.as_mut() {
-                    let _ = child.kill().await;
+                    let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
                 }
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
@@ -509,21 +551,64 @@ impl Core {
             }
         };
 
-        let client = CoreClient::attach(stream);
+        let (client, mut transport_tasks) = CoreClient::attach_owned(stream);
+        tasks.0.append(&mut transport_tasks.0);
         Ok(Self {
             child,
-            _endpoint: owned_endpoint,
+            _endpoint: Some(owned_endpoint),
+            tasks,
+            closed: false,
+            close_error: None,
             client,
         })
     }
 
-    pub async fn shutdown(mut self) {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.client.stop()).await;
-        self.client.transport.close();
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    /// Attempts a bounded graceful Stop, then closes all transport clones and
+    /// reaps a directly owned child. An error means VPN restoration is unconfirmed.
+    pub async fn close(&mut self, grace: Duration) -> Result<()> {
+        if self.closed {
+            return match &self.close_error {
+                Some(e) => Err(anyhow!(e.clone())),
+                None => Ok(()),
+            };
         }
+        let stop = tokio::time::timeout(grace, self.client.stop())
+            .await
+            .map_err(|_| anyhow!("таймаут Stop; восстановление VPN не подтверждено"))
+            .and_then(|r| r)
+            .context("Stop: восстановление VPN не подтверждено");
+        self.client.transport.close();
+        for task in &self.tasks.0 {
+            task.abort();
+        }
+        for task in &mut self.tasks.0 {
+            let _ = task.await;
+        }
+        self.tasks.0.clear();
+        let reap = if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) => match child.start_kill() {
+                    Ok(()) => tokio::time::timeout(Duration::from_secs(5), child.wait())
+                        .await
+                        .context("таймаут завершения ядра")
+                        .and_then(|r| r.map(|_| ()).map_err(Into::into)),
+                    Err(e) => Err(e.into()),
+                },
+                Err(e) => Err(e.into()),
+            }
+        } else {
+            Ok(())
+        };
+        self._endpoint.take();
+        self.closed = true;
+        let result = stop.and(reap);
+        self.close_error = result.as_ref().err().map(|e| format!("{e:#}"));
+        result
+    }
+
+    pub async fn shutdown(mut self) {
+        let _ = self.close(Duration::from_secs(5)).await;
     }
 
     /// Whether the core process has exited on its own.
@@ -537,6 +622,9 @@ impl Core {
 impl Drop for Core {
     fn drop(&mut self) {
         self.client.transport.close();
+        for task in &self.tasks.0 {
+            task.abort();
+        }
     }
 }
 
@@ -585,24 +673,26 @@ fn peer_pid(stream: &UnixStream) -> std::io::Result<Option<u32>> {
     Ok(pid)
 }
 
-fn pipe_core_logs(child: &mut Child) {
+fn pipe_core_logs(child: &mut Child) -> Vec<tokio::task::JoinHandle<()>> {
+    let mut tasks = Vec::new();
     use tokio::io::{AsyncBufReadExt, BufReader};
     if let Some(out) = child.stdout.take() {
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             let mut lines = BufReader::new(out).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!(target: "core", "{line}");
             }
-        });
+        }));
     }
     if let Some(err) = child.stderr.take() {
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             let mut lines = BufReader::new(err).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!(target: "core", "{line}");
             }
-        });
+        }));
     }
+    tasks
 }
 
 /// Request to start the configuration.
@@ -642,7 +732,16 @@ pub fn speed_test_request(config: String) -> pb::SpeedTestRequest {
 }
 
 impl CoreClient {
+    #[cfg(test)]
     fn attach(stream: IpcStream) -> Self {
+        let (client, mut tasks) = Self::attach_owned(stream);
+        // Legacy transport-only tests allow tasks to finish on transport close.
+        tasks.0.clear();
+        client
+    }
+
+    fn attach_owned(stream: IpcStream) -> (Self, Tasks) {
+        let mut tasks = Tasks(Vec::new());
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::channel::<Call>(12);
         let (closed, _) = watch::channel(false);
@@ -656,7 +755,7 @@ impl CoreClient {
         {
             let state = transport.clone();
             let mut closed = state.closed.subscribe();
-            tokio::spawn(async move {
+            tasks.0.push(tokio::spawn(async move {
                 let run = async {
                     while let Some(call) = rx.recv().await {
                         if call.reply.is_closed() {
@@ -686,12 +785,12 @@ impl CoreClient {
                 tokio::select! { biased; _ = closed.wait_for(|value| *value) => {}, _ = run => {} }
                 state.close();
                 // Dropping this half and the reader's half closes the OS handle.
-            });
+            }));
         }
         {
             let state = transport.clone();
             let mut closed = state.closed.subscribe();
-            tokio::spawn(async move {
+            tasks.0.push(tokio::spawn(async move {
                 let run = async {
                     loop {
                         let mut head = [0u8; 9];
@@ -716,9 +815,9 @@ impl CoreClient {
                 };
                 tokio::select! { biased; _ = closed.wait_for(|value| *value) => {}, _ = run => {} }
                 state.close();
-            });
+            }));
         }
-        Self { tx, transport }
+        (Self { tx, transport }, tasks)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -828,14 +927,8 @@ impl CoreClient {
     }
 
     pub async fn test(&self, req: pb::TestReq) -> Result<pb::TestResp> {
-        // Two sequential probes per profile; assume serial execution even when
-        // the core can parallelize, with generous startup/teardown margin.
-        let seconds = 60
-            + req.outbound_tags.len().max(1) as u64
-                * 2
-                * (req.test_timeout_ms().max(10_000) as u64 / 1000 + 1);
-        self.call_with_timeout("Test", req, Duration::from_secs(seconds))
-            .await
+        let budget = latency_budget(&req);
+        self.call_with_timeout("Test", req, budget).await
     }
 
     pub async fn stop_test(&self) -> Result<()> {
@@ -861,13 +954,8 @@ impl CoreClient {
     }
 
     pub async fn speed_test(&self, req: pb::SpeedTestRequest) -> Result<pb::SpeedTestResponse> {
-        // Discovery and latency plus separate download/upload timeouts for each
-        // profile. Serial budgeting is deliberately conservative.
-        let seconds = 120
-            + req.outbound_tags.len().max(1) as u64
-                * (60 + 2 * (req.timeout_ms().max(10_000) as u64 / 1000 + 1));
-        self.call_with_timeout("SpeedTest", req, Duration::from_secs(seconds))
-            .await
+        let budget = speed_budget(&req);
+        self.call_with_timeout("SpeedTest", req, budget).await
     }
 
     pub async fn query_speed_test(&self) -> Result<pb::QuerySpeedTestResponse> {
@@ -922,4 +1010,197 @@ impl CoreClient {
             e => Err(anyhow!(e.to_string())),
         }
     }
+}
+
+#[cfg(all(test, unix))]
+mod safety_tests {
+    use super::*;
+
+    async fn request(peer: &mut UnixStream) -> u32 {
+        let id = peer.read_u32_le().await.unwrap();
+        let len = peer.read_u16_le().await.unwrap();
+        let mut method = vec![0; len as usize];
+        peer.read_exact(&mut method).await.unwrap();
+        let len = peer.read_u32_le().await.unwrap();
+        let mut payload = vec![0; len as usize];
+        peer.read_exact(&mut payload).await.unwrap();
+        id
+    }
+
+    async fn finish(client: &CoreClient, mut tasks: Tasks) {
+        client.transport.close();
+        for task in &mut tasks.0 {
+            tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        tasks.0.clear();
+    }
+
+    #[tokio::test]
+    async fn pending_removed_on_timeout_drop_and_late_reply() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach_owned(stream);
+        let c = client.clone();
+        let call = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_millis(50), c.query_stats()).await
+        });
+        let id = request(&mut peer).await;
+        assert!(call.await.unwrap().is_err());
+        assert_eq!(client.transport.pending.lock().unwrap().len(), 0);
+        peer.write_all(&[id.to_le_bytes().as_slice(), &[0], &0u32.to_le_bytes()].concat())
+            .await
+            .unwrap();
+        let c = client.clone();
+        let call = tokio::spawn(async move { c.query_stats().await });
+        request(&mut peer).await;
+        call.abort();
+        let _ = call.await;
+        assert_eq!(client.transport.pending.lock().unwrap().len(), 0);
+        // A late response must not poison the next request.
+        let c = client.clone();
+        let call = tokio::spawn(async move { c.query_stats().await });
+        let id = request(&mut peer).await;
+        peer.write_all(&[id.to_le_bytes().as_slice(), &[0], &0u32.to_le_bytes()].concat())
+            .await
+            .unwrap();
+        call.await.unwrap().unwrap();
+        finish(&client, tasks).await;
+    }
+
+    #[tokio::test]
+    async fn close_invalidates_clones_and_preserves_failure() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach_owned(stream);
+        let clone = client.clone();
+        let mut core = Core {
+            child: None,
+            _endpoint: None,
+            tasks,
+            closed: false,
+            close_error: None,
+            client,
+        };
+        assert!(core.close(Duration::from_millis(20)).await.is_err());
+        assert!(core.tasks.0.is_empty());
+        assert!(clone.query_stats().await.is_err());
+        assert_eq!(clone.transport.pending.lock().unwrap().len(), 0);
+        assert!(core.close(Duration::from_secs(1)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn writer_failure_wakes_all_and_joins() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach_owned(stream);
+        let c = client.clone();
+        let first = tokio::spawn(async move {
+            c.call_with_timeout::<_, pb::EmptyResp>(
+                "Test",
+                pb::EmptyReq {},
+                Duration::from_secs(30),
+            )
+            .await
+        });
+        request(&mut peer).await;
+        // Stop reading but retain the peer write half: failure must originate
+        // in the writer rather than relying on EOF from the response reader.
+        let (peer_read, _peer_write) = peer.into_split();
+        drop(peer_read);
+        let c = client.clone();
+        let second = tokio::spawn(async move {
+            c.call_with_timeout::<_, pb::EmptyResp>(
+                "Test",
+                pb::LoadConfigReq {
+                    core_config: Some("x".repeat(8 * 1024 * 1024)),
+                    ..Default::default()
+                },
+                Duration::from_secs(1),
+            )
+            .await
+        });
+        assert!(tokio::time::timeout(Duration::from_secs(8), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(second.await.unwrap().is_err());
+        assert_eq!(client.transport.pending.lock().unwrap().len(), 0);
+        finish(&client, tasks).await;
+    }
+
+    #[test]
+    fn endpoint_guards_are_independent_and_preserve_replacements() {
+        let root = tempfile::tempdir().unwrap();
+        let ga = Endpoint::create(root.path()).unwrap();
+        let gb = Endpoint::create(root.path()).unwrap();
+        let a = ga.path.clone();
+        let b = gb.path.clone();
+        let _a_listener = std::os::unix::net::UnixListener::bind(&a).unwrap();
+        let _b_listener = std::os::unix::net::UnixListener::bind(&b).unwrap();
+        // Foreign entries outside an owned private directory survive cleanup.
+        let replacement = root.path().join("replacement");
+        std::fs::write(&replacement, b"foreign").unwrap();
+        drop(ga);
+        assert!(!a.exists());
+        assert!(b.exists());
+        drop(gb);
+        assert_eq!(std::fs::read(replacement).unwrap(), b"foreign");
+    }
+
+    #[test]
+    fn concurrent_endpoint_names_unique() {
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (0..100)
+                        .map(|_| Endpoint::create(Path::new("/tmp")).unwrap())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let names: std::collections::HashSet<_> = threads
+            .into_iter()
+            .flat_map(|t| t.join().unwrap())
+            .map(|endpoint| endpoint.path.clone())
+            .collect();
+        assert_eq!(names.len(), 800);
+    }
+
+    #[test]
+    fn long_latency_deadline_arithmetic() {
+        let mut req = pb::TestReq {
+            outbound_tags: vec![String::new(); 501],
+            ..Default::default()
+        };
+        assert_eq!(latency_budget(&req), Duration::from_secs(11082));
+        req.max_concurrency = Some(500);
+        assert_eq!(latency_budget(&req), Duration::from_secs(11082));
+        req.max_concurrency = Some(2);
+        req.test_timeout_ms = Some(10_000);
+        assert_eq!(latency_budget(&req), Duration::from_secs(11082));
+        let speed = pb::SpeedTestRequest {
+            outbound_tags: vec![String::new(); 10],
+            test_download: Some(true),
+            test_upload: Some(true),
+            timeout_ms: Some(60_000),
+            ..Default::default()
+        };
+        assert_eq!(speed_budget(&speed), Duration::from_secs(1940));
+    }
+}
+
+fn latency_budget(req: &pb::TestReq) -> Duration {
+    Duration::from_secs(
+        60 + req.outbound_tags.len().max(1) as u64
+            * 2
+            * (req.test_timeout_ms().max(10_000) as u64 / 1000 + 1),
+    )
+}
+
+fn speed_budget(req: &pb::SpeedTestRequest) -> Duration {
+    Duration::from_secs(
+        120 + req.outbound_tags.len().max(1) as u64
+            * (60 + 2 * (req.timeout_ms().max(10_000) as u64 / 1000 + 1)),
+    )
 }

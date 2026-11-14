@@ -8,12 +8,96 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use crate::i18n::tr;
 use crate::ui::Window;
 use throne_config::route::{Condition, MatchKind, MatchMode, RouteAction, RouteRule};
 
+// Localized presentation only: stored rule names and condition values are data.
+fn kind_title(kind: MatchKind) -> &'static str {
+    let en = match kind {
+        MatchKind::DomainSuffix => "Domain and subdomains",
+        MatchKind::Domain => "Exact domain",
+        MatchKind::DomainKeyword => "Domain keyword",
+        MatchKind::DomainRegex => "Domain expression",
+        MatchKind::IpCidr => "Address or subnet",
+        MatchKind::Port => "Port",
+        MatchKind::Process => "Process",
+        MatchKind::RuleSet => "Rule set",
+    };
+    tr(kind.title(), en)
+}
+
+fn kind_hint(kind: MatchKind) -> &'static str {
+    let en = match kind {
+        MatchKind::DomainSuffix => "example.com — the domain and all subdomains",
+        MatchKind::Domain => "example.com — this domain only",
+        MatchKind::DomainKeyword => "part of the name, for example: googlevideo",
+        MatchKind::DomainRegex => "regular expression: ^ads\\..*",
+        MatchKind::IpCidr => "10.0.0.0/8 or 192.168.1.5",
+        MatchKind::Port => "443 or a range: 8000:8100",
+        MatchKind::Process => "firefox, Telegram",
+        MatchKind::RuleSet => "geosite-ru, geoip-ru — downloaded automatically",
+    };
+    tr(kind.hint(), en)
+}
+
+fn action_title(action: RouteAction) -> &'static str {
+    tr(
+        action.title(),
+        match action {
+            RouteAction::Proxy => "Through proxy",
+            RouteAction::Direct => "Direct",
+            RouteAction::Block => "Block",
+        },
+    )
+}
+
+fn mode_title(mode: MatchMode) -> &'static str {
+    tr(
+        mode.title(),
+        match mode {
+            MatchMode::Any => "Match any condition",
+            MatchMode::All => "Match all conditions",
+        },
+    )
+}
+
+fn conditions_title(rule: &RouteRule) -> String {
+    if rule.conditions.is_empty() {
+        return tr("Условий нет", "No conditions").into();
+    }
+    let separator = match rule.match_mode {
+        MatchMode::Any => tr(" или ", " or "),
+        MatchMode::All => tr(" и ", " and "),
+    };
+    rule.conditions
+        .iter()
+        .map(|c| kind_title(c.kind))
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
+fn rule_display_name(rule: &RouteRule) -> String {
+    if !rule.name.trim().is_empty() {
+        return rule.name.clone();
+    }
+    let values: Vec<&String> = rule
+        .conditions
+        .iter()
+        .flat_map(|c| c.values.iter())
+        .filter(|v| !v.trim().is_empty())
+        .collect();
+    let summary = match values.len() {
+        0 => tr("условие не задано", "no condition set").into(),
+        1 => values[0].clone(),
+        n => crate::tr_format!("{} и ещё {}", "{} and {} more", values[0], n - 1),
+    };
+    format!("{}: {}", conditions_title(rule), summary)
+}
+
 pub fn open(window: &Rc<Window>) {
     let dialog = adw::Dialog::builder()
-        .title("Правила маршрутизации")
+        .title(tr("Правила маршрутизации", "Routing rules"))
         .content_width(620)
         .content_height(640)
         .build();
@@ -21,29 +105,38 @@ pub fn open(window: &Rc<Window>) {
     let header = adw::HeaderBar::new();
     let add = gtk::Button::builder()
         .icon_name("list-add-symbolic")
-        .tooltip_text("Добавить правило")
+        .tooltip_text(tr("Добавить правило", "Add rule"))
         .build();
     header.pack_start(&add);
 
     let import = gtk::Button::builder()
         .icon_name("document-import-symbolic")
-        .tooltip_text("Перенести правила из Throne")
+        .tooltip_text(tr(
+            "Перенести правила из Throne",
+            "Import rules from Throne",
+        ))
         .build();
     header.pack_end(&import);
 
     let page = adw::PreferencesPage::new();
     let group = adw::PreferencesGroup::builder()
-        .title("Правила")
-        .description("Применяется первое подошедшее. Всё, что не подошло, идёт через прокси")
+        .title(tr("Правила", "Rules"))
+        .description(tr(
+            "Применяется первое подошедшее. Всё, что не подошло, идёт через прокси",
+            "The first matching rule applies. Unmatched traffic goes through the proxy",
+        ))
         .build();
     page.add(&group);
 
     let extra = adw::PreferencesGroup::builder()
-        .title("Дополнительно")
-        .description("Правила в формате sing-box для случаев, которые не выражаются формой")
+        .title(tr("Дополнительно", "Advanced"))
+        .description(tr(
+            "Правила в формате sing-box для случаев, которые не выражаются формой",
+            "Rules in sing-box format for cases not covered by the editor",
+        ))
         .build();
     let raw_row = adw::ActionRow::builder()
-        .title("Правила текстом")
+        .title(tr("Правила текстом", "Raw rules"))
         .activatable(true)
         .build();
     raw_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -87,25 +180,38 @@ pub fn open(window: &Rc<Window>) {
                 .borrow_mut()
                 .import_throne_routes(&crate::paths::throne_database());
             match outcome {
-                Ok((0, 0)) => window.toast("В Throne нет правил для переноса"),
+                Ok((0, 0)) => window.toast(tr(
+                    "В Throne нет правил для переноса",
+                    "No rules to import from Throne",
+                )),
                 Ok((added, skipped)) => {
                     // Import writes directly to the database while the window has
                     // its own settings copy: without reloading, rules are hidden,
                     // and the first settings save overwrites them.
                     if let Err(e) = window.state().reload_settings() {
-                        window.toast(&format!("Правила перенесены, но не прочитаны: {e}"));
+                        window.toast(&crate::tr_format!(
+                            "Правила перенесены, но не прочитаны: {e}",
+                            "Rules imported but could not be loaded: {e}"
+                        ));
                         return;
                     }
                     rebuild();
-                    let mut text = format!("Перенесено правил: {added}");
+                    let mut text =
+                        crate::tr_format!("Перенесено правил: {added}", "Rules imported: {added}");
                     // This cannot be omitted: the user would assume routing was
                     // fully imported and would not understand misplaced traffic.
                     if skipped > 0 {
-                        text.push_str(&format!(". Не перенеслось: {skipped} — задайте их заново"));
+                        text.push_str(&crate::tr_format!(
+                            ". Не перенеслось: {skipped} — задайте их заново",
+                            ". Skipped: {skipped} — recreate them manually"
+                        ));
                     }
                     window.toast(&text);
                 }
-                Err(e) => window.toast(&format!("Импорт не удался: {e}")),
+                Err(e) => window.toast(&crate::tr_format!(
+                    "Импорт не удался: {e}",
+                    "Import failed: {e}"
+                )),
             }
         }
     });
@@ -123,8 +229,11 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
     let rules = window.state().settings.borrow().route_rules.clone();
     if rules.is_empty() {
         let empty = adw::ActionRow::builder()
-            .title("Правил нет")
-            .subtitle("Весь трафик идёт через прокси, кроме локальных адресов")
+            .title(tr("Правил нет", "No rules"))
+            .subtitle(tr(
+                "Весь трафик идёт через прокси, кроме локальных адресов",
+                "All traffic goes through the proxy except local addresses",
+            ))
             .build();
         empty.add_css_class("dim-label");
         group.add(&empty);
@@ -141,11 +250,11 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
     let total = rules.len();
     for (index, rule) in rules.iter().enumerate() {
         let row = adw::ActionRow::builder()
-            .title(rule.display_name())
+            .title(rule_display_name(rule))
             .subtitle(format!(
                 "{} · {}",
-                rule.conditions_title(),
-                rule.action.title()
+                conditions_title(rule),
+                action_title(rule.action)
             ))
             .activatable(true)
             .build();
@@ -153,7 +262,10 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
         let toggle = gtk::Switch::builder()
             .active(rule.enabled)
             .valign(gtk::Align::Center)
-            .tooltip_text("Включить или выключить правило")
+            .tooltip_text(tr(
+                "Включить или выключить правило",
+                "Enable or disable rule",
+            ))
             .build();
         toggle.connect_state_set({
             let window = window.clone();
@@ -175,7 +287,7 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
             .icon_name("go-up-symbolic")
             .valign(gtk::Align::Center)
             .sensitive(index > 0)
-            .tooltip_text("Выше по приоритету")
+            .tooltip_text(tr("Выше по приоритету", "Higher priority"))
             .css_classes(["flat"])
             .build();
         up.connect_clicked({
@@ -191,7 +303,7 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
             .icon_name("go-down-symbolic")
             .valign(gtk::Align::Center)
             .sensitive(index + 1 < total)
-            .tooltip_text("Ниже по приоритету")
+            .tooltip_text(tr("Ниже по приоритету", "Lower priority"))
             .css_classes(["flat"])
             .build();
         down.connect_clicked({
@@ -206,7 +318,7 @@ fn fill(window: &Rc<Window>, group: &adw::PreferencesGroup, dialog: &adw::Dialog
         let remove = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
             .valign(gtk::Align::Center)
-            .tooltip_text("Удалить правило")
+            .tooltip_text(tr("Удалить правило", "Delete rule"))
             .css_classes(["flat"])
             .build();
         remove.connect_clicked({
@@ -272,7 +384,10 @@ fn move_rule(window: &Rc<Window>, from: usize, to: usize) {
 
 fn save(window: &Rc<Window>) {
     if let Err(e) = window.state().save_settings() {
-        window.toast(&format!("Не удалось сохранить правила: {e}"));
+        window.toast(&crate::tr_format!(
+            "Не удалось сохранить правила: {e}",
+            "Could not save rules: {e}"
+        ));
     }
 }
 
@@ -298,14 +413,14 @@ fn edit_rule(
         .unwrap_or_default();
 
     let dialog = adw::Dialog::builder()
-        .title("Правило")
+        .title(tr("Правило", "Rule"))
         .content_width(520)
         .content_height(620)
         .build();
 
     let header = adw::HeaderBar::new();
     let save_button = gtk::Button::builder()
-        .label("Сохранить")
+        .label(tr("Сохранить", "Save"))
         .css_classes(["suggested-action"])
         .build();
     header.pack_end(&save_button);
@@ -314,14 +429,17 @@ fn edit_rule(
     let group = adw::PreferencesGroup::new();
 
     let name = adw::EntryRow::builder()
-        .title("Название")
+        .title(tr("Название", "Name"))
         .text(&rule.name)
         .build();
     group.add(&name);
 
-    let actions: Vec<&str> = RouteAction::all().iter().map(|a| a.title()).collect();
+    let actions: Vec<&str> = RouteAction::all()
+        .iter()
+        .map(|a| action_title(*a))
+        .collect();
     let action = adw::ComboRow::builder()
-        .title("Действие")
+        .title(tr("Действие", "Action"))
         .model(&gtk::StringList::new(&actions))
         .selected(
             RouteAction::all()
@@ -332,10 +450,13 @@ fn edit_rule(
         .build();
     group.add(&action);
 
-    let modes: Vec<&str> = MatchMode::all().iter().map(|m| m.title()).collect();
+    let modes: Vec<&str> = MatchMode::all().iter().map(|m| mode_title(*m)).collect();
     let mode = adw::ComboRow::builder()
-        .title("Когда срабатывает")
-        .subtitle("«Любое» — список исключений, «все» — совпадение по всем признакам сразу")
+        .title(tr("Когда срабатывает", "Match mode"))
+        .subtitle(tr(
+            "«Любое» — список исключений, «все» — совпадение по всем признакам сразу",
+            "“Any” matches an exception list; “all” requires every condition to match",
+        ))
         .model(&gtk::StringList::new(&modes))
         .selected(
             MatchMode::all()
@@ -349,12 +470,15 @@ fn edit_rule(
 
     let add_condition = gtk::Button::builder()
         .icon_name("list-add-symbolic")
-        .tooltip_text("Добавить условие")
+        .tooltip_text(tr("Добавить условие", "Add condition"))
         .css_classes(["flat"])
         .build();
     let conditions_group = adw::PreferencesGroup::builder()
-        .title("Условия")
-        .description("Правило узнаёт соединение по этим признакам")
+        .title(tr("Условия", "Conditions"))
+        .description(tr(
+            "Правило узнаёт соединение по этим признакам",
+            "The rule identifies connections using these criteria",
+        ))
         .header_suffix(&add_condition)
         .build();
     page.add(&conditions_group);
@@ -408,7 +532,10 @@ fn edit_rule(
                 .collect();
 
             if conditions.is_empty() {
-                window.toast("Впишите хотя бы одно значение");
+                window.toast(tr(
+                    "Впишите хотя бы одно значение",
+                    "Enter at least one value",
+                ));
                 return;
             }
 
@@ -435,7 +562,10 @@ fn edit_rule(
             dialog.close();
 
             if window.state().is_connected() {
-                window.toast("Правило сохранено — применится при следующем подключении");
+                window.toast(tr(
+                    "Правило сохранено — применится при следующем подключении",
+                    "Rule saved — applies on the next connection",
+                ));
             }
         }
     });
@@ -475,14 +605,14 @@ fn add_condition_row(
     condition: &Condition,
 ) {
     let row = adw::ExpanderRow::builder()
-        .title(condition.kind.title())
-        .subtitle(condition.kind.hint())
+        .title(kind_title(condition.kind))
+        .subtitle(kind_hint(condition.kind))
         .expanded(true)
         .build();
 
-    let kinds: Vec<&str> = MatchKind::all().iter().map(|k| k.title()).collect();
+    let kinds: Vec<&str> = MatchKind::all().iter().map(|k| kind_title(*k)).collect();
     let kind = adw::ComboRow::builder()
-        .title("Условие")
+        .title(tr("Условие", "Condition"))
         .model(&gtk::StringList::new(&kinds))
         .selected(
             MatchKind::all()
@@ -515,7 +645,7 @@ fn add_condition_row(
     let remove = gtk::Button::builder()
         .icon_name("user-trash-symbolic")
         .valign(gtk::Align::Center)
-        .tooltip_text("Убрать условие")
+        .tooltip_text(tr("Убрать условие", "Remove condition"))
         .css_classes(["flat"])
         .build();
     row.add_suffix(&remove);
@@ -526,8 +656,8 @@ fn add_condition_row(
         let row = row.clone();
         move |combo| {
             let selected = MatchKind::all()[combo.selected() as usize];
-            row.set_title(selected.title());
-            row.set_subtitle(selected.hint());
+            row.set_title(kind_title(selected));
+            row.set_subtitle(kind_hint(selected));
         }
     });
 

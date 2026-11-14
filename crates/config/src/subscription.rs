@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use crate::link;
 use crate::profile::Profile;
+use crate::settings::Language;
 
 /// Parsing result: what was read successfully and what failed.
 #[derive(Debug, Default)]
@@ -479,6 +480,11 @@ fn clash_proxy_to_outbound(p: &serde_yaml_ng::Value) -> Result<Profile> {
 /// Parses the `subscription-userinfo` header into a human-readable string.
 /// Format: `upload=0; download=1234; total=5678; expire=1700000000`.
 pub fn format_userinfo(header: &str) -> String {
+    format_userinfo_for_language(header, Language::Ru)
+}
+
+/// Formats newly received quota information in an explicitly selected language.
+pub fn format_userinfo_for_language(header: &str, language: Language) -> String {
     let mut used = 0u64;
     let mut total = 0u64;
     let mut expire = 0i64;
@@ -496,28 +502,44 @@ pub fn format_userinfo(header: &str) -> String {
 
     let mut parts = Vec::new();
     if total > 0 {
-        parts.push(format!("{} из {}", human_bytes(used), human_bytes(total)));
+        let used = human_bytes_for_language(used, language);
+        let total = human_bytes_for_language(total, language);
+        parts.push(match language {
+            Language::Ru => format!("{used} из {total}"),
+            Language::En => format!("{used} used of {total}"),
+        });
     } else if used > 0 {
-        parts.push(human_bytes(used));
+        parts.push(human_bytes_for_language(used, language));
     }
     if expire > 0 {
-        parts.push(format!("до {}", format_date(expire)));
+        let date = format_date(expire);
+        parts.push(match language {
+            Language::Ru => format!("до {date}"),
+            Language::En => format!("expires {date}"),
+        });
     }
     parts.join(", ")
 }
 
 pub fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
+    human_bytes_for_language(bytes, Language::Ru)
+}
+
+fn human_bytes_for_language(bytes: u64, language: Language) -> String {
+    let units = match language {
+        Language::Ru => ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"],
+        Language::En => ["B", "KiB", "MiB", "GiB", "TiB"],
+    };
     let mut value = bytes as f64;
     let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
+    while value >= 1024.0 && unit < units.len() - 1 {
         value /= 1024.0;
         unit += 1;
     }
     if unit == 0 {
-        format!("{bytes} {}", UNITS[0])
+        format!("{bytes} {}", units[0])
     } else {
-        format!("{value:.1} {}", UNITS[unit])
+        format!("{value:.1} {}", units[unit])
     }
 }
 
@@ -608,6 +630,58 @@ proxies:
         );
         assert!(s.starts_with("2.0 ГиБ из 100.0 ГиБ"), "{s}");
         assert!(s.contains("до 2027-"), "{s}");
+    }
+
+    #[test]
+    fn userinfo_explicit_languages() {
+        let header = "upload=1073741824; download=1073741824; total=107374182400; expire=86400";
+        assert_eq!(
+            format_userinfo_for_language(header, Language::Ru),
+            "2.0 ГиБ из 100.0 ГиБ, до 1970-01-02"
+        );
+        assert_eq!(
+            format_userinfo(header),
+            format_userinfo_for_language(header, Language::Ru)
+        );
+        assert_eq!(
+            format_userinfo_for_language(header, Language::En),
+            "2.0 GiB used of 100.0 GiB, expires 1970-01-02"
+        );
+        for (language, expiry, zero_quota) in [
+            (Language::Ru, "до 1970-01-02", "0 Б из 1.0 КиБ"),
+            (Language::En, "expires 1970-01-02", "0 B used of 1.0 KiB"),
+        ] {
+            assert_eq!(
+                format_userinfo_for_language("expire=86400", language),
+                expiry
+            );
+            assert_eq!(
+                format_userinfo_for_language("total=1024", language),
+                zero_quota
+            );
+            for empty in [
+                "",
+                "upload=0; download=0; total=0; expire=0",
+                "unknown=value",
+            ] {
+                assert_eq!(format_userinfo_for_language(empty, language), "");
+            }
+        }
+    }
+
+    #[test]
+    fn userinfo_localized_byte_units() {
+        for (bytes, ru, en) in [
+            (512u64, "512 Б", "512 B"),
+            (1536, "1.5 КиБ", "1.5 KiB"),
+            (1 << 20, "1.0 МиБ", "1.0 MiB"),
+            (1 << 30, "1.0 ГиБ", "1.0 GiB"),
+            (1 << 40, "1.0 ТиБ", "1.0 TiB"),
+        ] {
+            let header = format!("download={bytes}");
+            assert_eq!(format_userinfo_for_language(&header, Language::Ru), ru);
+            assert_eq!(format_userinfo_for_language(&header, Language::En), en);
+        }
     }
 
     #[test]
