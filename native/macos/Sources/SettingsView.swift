@@ -63,6 +63,11 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         Section(tr("Основное", "General")) {
+            Picker(tr("Тема оформления", "Appearance"), selection: appearanceBinding) {
+                Text(tr("Системная", "System")).tag("system")
+                Text(tr("Светлая", "Light")).tag("light")
+                Text(tr("Тёмная", "Dark")).tag("dark")
+            }
             Picker(tr("Язык", "Language"), selection: stringBinding("language")) {
                 Text("Русский").tag("ru")
                 Text("English").tag("en")
@@ -81,6 +86,11 @@ struct SettingsView: View {
 
             numberField("mixed_port", title: tr("Порт прокси", "Proxy port"), range: 1024...65535)
         }
+    }
+
+    @AppStorage("appearance") private var appearance = "system"
+    private var appearanceBinding: Binding<String> {
+        Binding(get: { appearance }, set: { appearance = $0 })
     }
 
     private var proxySection: some View {

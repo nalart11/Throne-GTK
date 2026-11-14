@@ -10,9 +10,10 @@ import UniformTypeIdentifiers
 
 @main struct ThroneApp: App {
     @StateObject private var model = Model()
+    @AppStorage("appearance") private var appearance = "system"
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
     var body: some Scene {
-        Window("Throne GTK", id: "main") { MainView().environmentObject(model).frame(minWidth: 900, minHeight: 620).background(MainWindowAccessor(lifecycle: lifecycle)).task { lifecycle.model = model; model.start() } }
+        Window("Throne GTK", id: "main") { MainView().environmentObject(model).frame(minWidth: 900, minHeight: 620).background(MainWindowAccessor(lifecycle: lifecycle)).task { lifecycle.model = model; model.start() }.preferredColorScheme(colorScheme) }
             .commands {
                 CommandGroup(replacing: .newItem) {}
                 CommandGroup(replacing: .appTermination) {
@@ -20,8 +21,9 @@ import UniformTypeIdentifiers
                 }
                 CommandGroup(replacing:.appInfo){Button(model.tr("О программе Throne GTK","About Throne GTK")){let a=NSAlert();a.messageText="Throne GTK";a.informativeText=model.tr("Нативный клиент прокси и VPN.","Native proxy and VPN client.");a.runModal()}}
             }
-        Settings { SettingsView().environmentObject(model).frame(width: 650, height: 650) }
+        Settings { SettingsView().environmentObject(model).frame(width: 650, height: 650).preferredColorScheme(colorScheme) }
     }
+    private var colorScheme: ColorScheme? { appearance == "light" ? .light : appearance == "dark" ? .dark : nil }
 }
 
 struct MainView: View {
@@ -168,7 +170,7 @@ struct ProfileRow: View {
             Spacer()
             Text(latency).font(.system(.callout, design: .rounded).monospacedDigit()).foregroundStyle(.secondary)
             if connected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-        }.padding(12).background(.background, in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(connected ? Color.accentColor.opacity(0.45) : Color.secondary.opacity(0.12)))
+        }.foregroundStyle(.primary).padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(connected ? Color.accentColor.opacity(0.65) : Color.secondary.opacity(0.18), lineWidth: connected ? 1.5 : 1))
     }
 }
 
