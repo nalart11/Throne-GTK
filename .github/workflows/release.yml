@@ -176,7 +176,7 @@ jobs:
           libgtk-4-1, libadwaita-1-0, libc6, libgcc-s1 and the Cronet runtime
           dependencies). Not a fully static or universal Linux build. The archive
           has a single versioned root, lib/throne-gtk/{throne-gtk,throne-gtk-core,
-          libcronet.so}, icons and a desktop template; @EXEC@ needs an absolute
+          libcronet.so}, icons and a desktop template; `@EXEC@` needs an absolute
           installation path. No capabilities or system configuration are changed.
 
           macOS TESTING ONLY: no Developer ID signature and no notarization.
