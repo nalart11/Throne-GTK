@@ -78,11 +78,13 @@ install -m755 "$root/scripts/uninstall-macos.sh" "$base/uninstall.sh"
 
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 [[ -n "$version" ]] || version="0.1.0"
-sign_args=()
+# Bash 3.2 treats an empty array as unset under nounset. Positional parameters
+# expand to zero arguments safely, including on the system macOS Bash.
+set --
 if [[ "$mode" = release ]]; then
-    sign_args=(--sign "$INSTALLER_SIGN_IDENTITY" --timestamp)
+    set -- --sign "$INSTALLER_SIGN_IDENTITY" --timestamp
 fi
-pkgbuild "${sign_args[@]}" \
+pkgbuild "$@" \
     --root "$payload" \
     --scripts "$pkg_scripts" \
     --component-plist "$components" \

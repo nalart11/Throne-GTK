@@ -21,6 +21,45 @@ assert 'bootout is NOT unregister' in pre
 assert '[ ! -e "$link" ] && [ ! -L "$link" ]' in post
 assert 'ditto --noextattr --noacl "$app" "$base/Throne GTK.app"' in pkg
 assert '--dev-manual' in pkg and '--release' in pkg
+# Execute the production optional-argument block, not a reimplementation. This
+# runs under system Bash 3.2 on macOS CI as well as the host Bash on Linux.
+argument_block = pkg[pkg.index('set --\n'):pkg.index('if [[ "$mode" = release ]]; then\n    xcrun notarytool')]
+with tempfile.TemporaryDirectory() as tmp:
+    fixture = pathlib.Path(tmp)
+    script = fixture/'pkgbuild-arguments.sh'
+    script.write_text('''set -euo pipefail
+mode="$1"
+INSTALLER_SIGN_IDENTITY='Developer ID Installer: Fixture (TEST ID)'
+payload='fixture payload'
+pkg_scripts='fixture scripts'
+components='fixture components'
+version=0.2.0
+work='fixture work'
+pkgbuild() { printf '%s\\0' "$@"; }
+''' + argument_block)
+    common = ['--root', 'fixture payload', '--scripts', 'fixture scripts',
+              '--component-plist', 'fixture components', '--ownership', 'recommended',
+              '--identifier', 'dev.nalart.ThroneGtk.local-installer', '--version', '0.2.0',
+              '--install-location', '/', 'fixture work/throne-gtk-local-installer.pkg']
+    for mode, signing in [('manual', []), ('release', ['--sign', 'Developer ID Installer: Fixture (TEST ID)', '--timestamp'])]:
+        result = subprocess.run(['bash', str(script), mode], check=True, capture_output=True)
+        argv = result.stdout.decode().split('\0')
+        assert argv.pop() == ''  # final NUL, not an argv element
+        assert argv == signing + common, (mode, argv)
+        assert '' not in argv
+# Missing any signing credential must fail before platform checks or packaging.
+credentials = {'CODESIGN_IDENTITY': 'Developer ID Application: Fixture',
+               'INSTALLER_SIGN_IDENTITY': 'Developer ID Installer: Fixture',
+               'NOTARY_PROFILE': 'fixture-profile'}
+for missing in credentials:
+    env = dict(os.environ)
+    for key in (*credentials, 'THRONE_CODESIGN_IDENTITY'):
+        env.pop(key, None)
+    env.update({key: value for key, value in credentials.items() if key != missing})
+    result = subprocess.run(['bash', str(r/'scripts/package-macos-installer.sh'), '--release'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'Release requires CODESIGN_IDENTITY, INSTALLER_SIGN_IDENTITY and NOTARY_PROFILE' in result.stderr
 assert 'rm' not in pre.splitlines()[0] # preflight never deletes anything
 assert '/bin/rm' not in pre
 assert pre.index('Modified launchd plist') < pre.index('/bin/launchctl bootout')
