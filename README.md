@@ -23,8 +23,6 @@ Throne GTK is an independent desktop project originally based on [Throne](https:
 
 Use it as a local proxy or route traffic through a TUN-based VPN. Manage subscriptions, choose servers, configure DNS-over-HTTPS or DNS-over-TLS, and keep routing rules in one application.
 
-**Cross-platform validation is not complete:** stage 0 has not been accepted, macOS still needs native validation, and Windows remains the next gated stage. See the [plan](docs/CROSS_PLATFORM_PLAN.md), [stage 0 report](docs/STAGE0_REPORT.md), and [macOS validation](docs/MACOS_VALIDATION.md).
-
 ## Interface
 
 ### Linux · GTK4 / libadwaita
