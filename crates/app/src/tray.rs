@@ -61,8 +61,8 @@ impl ksni::Tray for Icon {
         ksni::ToolTip {
             title: "Throne GTK".into(),
             description: match &self.connected {
-                Some(name) => format!("Подключено: {name}"),
-                None => "Не подключено".into(),
+                Some(name) => crate::tr_format!("Подключено: {name}", "Connected: {name}"),
+                None => crate::i18n::tr("Не подключено", "Disconnected").into(),
             },
             ..Default::default()
         }
@@ -77,7 +77,7 @@ impl ksni::Tray for Icon {
         use ksni::menu::*;
         vec![
             StandardItem {
-                label: "Открыть окно".into(),
+                label: crate::i18n::tr("Открыть окно", "Open window").into(),
                 activate: Box::new(|icon: &mut Self| {
                     let _ = icon.actions.try_send(Action::Show);
                 }),
@@ -86,7 +86,7 @@ impl ksni::Tray for Icon {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Выйти".into(),
+                label: crate::i18n::tr("Выйти", "Quit").into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|icon: &mut Self| {
                     let _ = icon.actions.try_send(Action::Quit);

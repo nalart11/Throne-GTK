@@ -10,6 +10,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use crate::format;
+use crate::i18n::tr;
 use crate::state::State;
 use throne_config::profile::Group;
 
@@ -57,23 +58,26 @@ struct Row {
 impl ServersPage {
     pub fn new(state: Rc<State>) -> Rc<Self> {
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Поиск по имени или адресу")
+            .placeholder_text(tr("Поиск по имени или адресу", "Search by name or address"))
             .hexpand(true)
             .build();
 
         let groups_model = gtk::StringList::new(&[]);
         let groups_drop = gtk::DropDown::builder()
-            .tooltip_text("Группа серверов")
+            .tooltip_text(tr("Группа серверов", "Server group"))
             .model(&groups_model)
             .build();
 
         let test_button = gtk::Button::builder()
             .icon_name("network-cellular-signal-excellent-symbolic")
-            .tooltip_text("Проверить задержки всех серверов группы")
+            .tooltip_text(tr(
+                "Проверить задержки всех серверов группы",
+                "Test latency of all servers in the group",
+            ))
             .build();
         let update_button = gtk::Button::builder()
             .icon_name("view-refresh-symbolic")
-            .tooltip_text("Обновить подписку")
+            .tooltip_text(tr("Обновить подписку", "Update subscription"))
             .build();
 
         let toolbar = gtk::Box::builder()
@@ -111,8 +115,11 @@ impl ServersPage {
 
         let empty = adw::StatusPage::builder()
             .icon_name("network-server-symbolic")
-            .title("Здесь пока пусто")
-            .description("Добавьте подписку или вставьте ссылку на сервер кнопкой «+» в шапке.")
+            .title(tr("Здесь пока пусто", "No servers yet"))
+            .description(tr(
+                "Добавьте подписку или вставьте ссылку на сервер кнопкой «+» в шапке.",
+                "Use the “+” button in the header to add a subscription or paste a server link.",
+            ))
             .vexpand(true)
             .build();
 
@@ -240,7 +247,7 @@ impl ServersPage {
         let auto_running = self.state.connected_id() < 0;
 
         let copy = gtk::Button::builder()
-            .label("Скопировать ссылку")
+            .label(tr("Скопировать ссылку", "Copy link"))
             .css_classes(["flat"])
             .halign(gtk::Align::Fill)
             .visible(!is_auto_row)
@@ -251,9 +258,9 @@ impl ServersPage {
 
         let pin = gtk::Button::builder()
             .label(if is_auto_row {
-                "Снять закрепление"
+                tr("Снять закрепление", "Unpin")
             } else {
-                "Закрепить в автовыборе"
+                tr("Закрепить в автовыборе", "Pin in auto-selection")
             })
             .css_classes(["flat"])
             .halign(gtk::Align::Fill)
@@ -264,7 +271,7 @@ impl ServersPage {
         }
 
         let measure = gtk::Button::builder()
-            .label("Замерить скорость")
+            .label(tr("Замерить скорость", "Test speed"))
             .visible(!is_auto_row)
             .css_classes(["flat"])
             .halign(gtk::Align::Fill)
@@ -276,7 +283,7 @@ impl ServersPage {
             label.set_xalign(0.0);
         }
         let delete = gtk::Button::builder()
-            .label("Удалить сервер")
+            .label(tr("Удалить сервер", "Delete server"))
             .css_classes(["flat"])
             .halign(gtk::Align::Fill)
             .visible(!is_auto_row)
@@ -356,9 +363,12 @@ impl ServersPage {
                 match throne_config::share::to_link(&profile) {
                     Ok(link) => {
                         button.clipboard().set_text(&link);
-                        this.notify("Ссылка скопирована");
+                        this.notify(tr("Ссылка скопирована", "Link copied"));
                     }
-                    Err(e) => this.notify(&format!("Ссылку не собрать: {e}")),
+                    Err(e) => this.notify(&crate::tr_format!(
+                        "Ссылку не собрать: {e}",
+                        "Could not create link: {e}"
+                    )),
                 }
             }
         });
@@ -379,14 +389,17 @@ impl ServersPage {
                     .map(|p| p.name)
                     .unwrap_or_default();
                 if this.state.store.borrow().delete_profile(id).is_err() {
-                    this.notify("Не удалось удалить сервер");
+                    this.notify(tr("Не удалось удалить сервер", "Could not delete server"));
                     return;
                 }
                 if this.state.selected_id.get() == id {
                     this.state.selected_id.set(0);
                 }
                 this.reload();
-                this.notify(&format!("Сервер «{name}» удалён"));
+                this.notify(&crate::tr_format!(
+                    "Сервер «{name}» удалён",
+                    "Server “{name}” deleted"
+                ));
             }
         });
 
@@ -549,14 +562,19 @@ impl ServersPage {
 
         self.update_button.set_sensitive(group.is_subscription());
         if !group.is_subscription() {
-            self.group_info.set_label("Ручная группа");
+            self.group_info
+                .set_label(tr("Ручная группа", "Manual group"));
             return;
         }
         let updated = format::since(group.sub_last_update);
         let text = if group.info.is_empty() {
-            format!("Обновлено {updated}")
+            crate::tr_format!("Обновлено {updated}", "Updated {updated}")
         } else {
-            format!("{} · обновлено {updated}", group.info)
+            crate::tr_format!(
+                "{} · обновлено {updated}",
+                "{} · updated {updated}",
+                group.info
+            )
         };
         self.group_info.set_label(&text);
     }
@@ -641,9 +659,12 @@ impl ServersPage {
             "network-cellular-signal-excellent-symbolic"
         });
         self.test_button.set_tooltip_text(Some(if testing {
-            "Остановить проверку"
+            tr("Остановить проверку", "Stop testing")
         } else {
-            "Проверить задержки всех серверов группы"
+            tr(
+                "Проверить задержки всех серверов группы",
+                "Test latency of all servers in the group",
+            )
         }));
     }
 
@@ -738,19 +759,22 @@ fn build_row(profile: &throne_config::Profile, active: bool) -> Row {
 /// Auto-selection row: the core keeps the best server in the group beneath it.
 fn build_auto_row(count: usize, active: bool) -> Row {
     let name = gtk::Label::builder()
-        .label("Автовыбор")
+        .label(tr("Автовыбор", "Auto-selection"))
         .xalign(0.0)
         .css_classes(["name"])
         .build();
 
     let badge = gtk::Label::builder()
-        .label("АВТО")
+        .label(tr("АВТО", "AUTO"))
         .css_classes(["badge"])
         .valign(gtk::Align::Center)
         .build();
 
     let description = gtk::Label::builder()
-        .label(format!("лучший из {count} по задержке"))
+        .label(crate::tr_format!(
+            "лучший из {count} по задержке",
+            "lowest latency among {count} servers"
+        ))
         .xalign(0.0)
         .css_classes(["meta"])
         .build();

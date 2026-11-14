@@ -2,8 +2,9 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-app="$root/dist/Throne GTK.app"
-pkg="$root/dist/throne-gtk-local-installer.pkg"
+out="${THRONE_PACKAGE_OUT:-$root/dist}"
+app="$out/Throne GTK.app"
+pkg="$out/throne-gtk-local-installer.pkg"
 manual_plist="$root/resources/macos/dev.nalart.ThroneGtk.manual-helper.plist"
 postinstall="$root/resources/macos/installer/postinstall"
 components="$root/resources/macos/installer/components.plist"
@@ -28,11 +29,9 @@ plutil -lint "$manual_plist"
 plutil -lint "$components"
 codesign --verify --deep --strict --verbose=2 "$app"
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/throne-gtk-pkg.XXXXXX")"
-cleanup() {
-    rm -rf "$work"
-}
-trap cleanup EXIT
+mkdir -p "$out"
+work="$(mktemp -d "$out/pkg.XXXXXX")"
+# Retain uniquely scoped staging for inspection; never execute its postinstall.
 
 payload="$work/payload"
 pkg_scripts="$work/scripts"
@@ -44,7 +43,6 @@ install -m755 "$postinstall" "$pkg_scripts/postinstall"
 
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 [[ -n "$version" ]] || version="0.1.0"
-rm -f "$pkg"
 pkgbuild \
     --root "$payload" \
     --scripts "$pkg_scripts" \
@@ -53,7 +51,9 @@ pkgbuild \
     --identifier dev.nalart.ThroneGtk.local-installer \
     --version "$version" \
     --install-location / \
-    "$pkg"
+    "$work/throne-gtk-local-installer.pkg"
+[[ ! -e "$pkg" ]] || mv "$pkg" "$work/previous.pkg"
+mv "$work/throne-gtk-local-installer.pkg" "$pkg"
 
 echo "Готово: $pkg"
 echo "Установщик запросит пароль администратора один раз."

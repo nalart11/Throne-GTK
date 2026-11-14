@@ -12,14 +12,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use prost::Message;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Semaphore};
 
 #[cfg(target_os = "macos")]
 mod service_macos;
@@ -45,21 +46,103 @@ const MAX_FRAME: u32 = 64 * 1024 * 1024;
 type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<Result<Vec<u8>>>>>>;
 
 struct Call {
+    id: u32,
     method: &'static str,
     payload: Vec<u8>,
-    reply: oneshot::Sender<Result<Vec<u8>>>,
+}
+struct Transport {
+    pending: Pending,
+    cancel: watch::Sender<bool>,
+    slots: Semaphore,
+    next_id: AtomicU32,
+}
+impl Transport {
+    fn fail(&self) {
+        self.cancel.send_replace(true);
+        self.slots.close();
+        for (_, reply) in self.pending.lock().unwrap().drain() {
+            let _ = reply.send(Err(anyhow!("соединение с ядром разорвано")));
+        }
+    }
+}
+struct PendingGuard {
+    pending: Pending,
+    id: u32,
+}
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
+    }
+}
+struct Tasks(Vec<tokio::task::JoinHandle<()>>);
+impl Drop for Tasks {
+    fn drop(&mut self) {
+        for task in &self.0 {
+            task.abort();
+        }
+    }
+}
+struct EndpointGuard(PathBuf, Option<std::fs::Metadata>);
+impl EndpointGuard {
+    fn new(path: PathBuf) -> Self {
+        let metadata = std::fs::symlink_metadata(&path).ok();
+        Self(path, metadata)
+    }
+}
+impl Drop for EndpointGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let (Some(owned), Ok(current)) = (&self.1, std::fs::symlink_metadata(&self.0)) {
+                if owned.dev() == current.dev() && owned.ino() == current.ino() {
+                    let _ = std::fs::remove_file(&self.0);
+                }
+            }
+        }
+    }
+}
+static ENDPOINT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+fn endpoint_name(dir: &Path) -> PathBuf {
+    let seq = ENDPOINT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    #[cfg(unix)]
+    return dir.join(format!("core-{}-{seq}.sock", std::process::id()));
+    #[cfg(windows)]
+    {
+        let _ = dir;
+        PathBuf::from(format!(r"\\.\pipe\throne-gtk-{}-{seq}", std::process::id()))
+    }
 }
 
-/// Client for one live connection to the core. Can be cloned freely.
+fn endpoint_occupied(error: &std::io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::AlreadyExists
+    ) {
+        return true;
+    }
+    // First-instance named pipes report ACCESS_DENIED when another server
+    // already owns that name (or PIPE_BUSY while its instance is connected).
+    #[cfg(windows)]
+    if matches!(error.raw_os_error(), Some(5 | 231)) {
+        return true;
+    }
+    false
+}
+
+/// Client for one live connection. Closing its Core invalidates every clone.
 #[derive(Clone)]
 pub struct CoreClient {
     tx: mpsc::Sender<Call>,
+    state: Arc<Transport>,
 }
 
-/// The running core process together with its channel.
 pub struct Core {
     child: Option<Child>,
-    endpoint: PathBuf,
+    endpoint: Option<EndpointGuard>,
+    tasks: Tasks,
+    closed: bool,
+    close_error: Option<String>,
     pub client: CoreClient,
 }
 
@@ -85,42 +168,53 @@ impl Core {
         debug: bool,
         privileged: bool,
     ) -> Result<Self> {
-        // Windows derives a named-pipe name from the PID and has no socket directory.
-        #[cfg(windows)]
-        let _ = socket_dir;
-
         #[cfg(unix)]
-        let endpoint = socket_dir.join(format!("core-{}.sock", std::process::id()));
-        #[cfg(windows)]
-        let endpoint = PathBuf::from(format!(r"\\.\pipe\throne-gtk-{}", std::process::id()));
-
-        #[cfg(unix)]
-        let listener = {
-            cleanup_endpoint(&endpoint);
-            std::fs::create_dir_all(socket_dir)
-                .with_context(|| format!("создание {}", socket_dir.display()))?;
-            UnixListener::bind(&endpoint).with_context(|| format!("bind {}", endpoint.display()))?
+        std::fs::create_dir_all(socket_dir)
+            .with_context(|| format!("создание {}", socket_dir.display()))?;
+        let (listener, endpoint) = {
+            let mut bound = None;
+            for _ in 0..32 {
+                let path = endpoint_name(socket_dir);
+                #[cfg(target_os = "macos")]
+                {
+                    use std::os::unix::ffi::OsStrExt;
+                    if path.as_os_str().as_bytes().len() >= 104 {
+                        bail!("слишком длинный путь IPC: {}", path.display());
+                    }
+                }
+                #[cfg(unix)]
+                let result = UnixListener::bind(&path);
+                #[cfg(windows)]
+                let result = ServerOptions::new().first_pipe_instance(true).create(&path);
+                match result {
+                    Ok(listener) => {
+                        bound = Some((listener, EndpointGuard::new(path)));
+                        break;
+                    }
+                    Err(e) if endpoint_occupied(&e) => continue,
+                    Err(e) => return Err(e).with_context(|| format!("bind {}", path.display())),
+                }
+            }
+            bound.context("не удалось создать уникальный IPC endpoint")?
         };
-        #[cfg(windows)]
-        let listener = ServerOptions::new()
-            // Refuse to attach to an endpoint planted before us. The core also
-            // verifies the server PID after connecting.
-            .first_pipe_instance(true)
-            .create(&endpoint)
-            .with_context(|| format!("создание {}", endpoint.display()))?;
-
+        let mut tasks = Tasks(Vec::new());
         let mut child = None;
         if privileged {
             #[cfg(target_os = "macos")]
-            if let Err(error) = service_macos::start_privileged_core(&endpoint, debug).await {
-                cleanup_endpoint(&endpoint);
+            if let Err(error) = tokio::time::timeout(
+                Duration::from_secs(30),
+                service_macos::start_privileged_core(&endpoint.0, debug),
+            )
+            .await
+            .context("таймаут запуска привилегированного ядра")?
+            {
                 return Err(error);
             }
             #[cfg(not(target_os = "macos"))]
             unreachable!("privileged helper is only used on macOS");
         } else {
             let mut cmd = Command::new(core_bin);
-            cmd.env("THRONE_CORE_SOCKET", &endpoint)
+            cmd.env("THRONE_CORE_SOCKET", &endpoint.0)
                 .env("THRONE_CORE_DEBUG", if debug { "1" } else { "0" })
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -129,11 +223,10 @@ impl Core {
             let mut spawned = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    cleanup_endpoint(&endpoint);
                     return Err(e).with_context(|| format!("запуск ядра {}", core_bin.display()));
                 }
             };
-            pipe_core_logs(&mut spawned);
+            tasks.0.extend(pipe_core_logs(&mut spawned));
             child = Some(spawned);
         }
 
@@ -151,38 +244,82 @@ impl Core {
             Ok(Ok(stream)) => stream,
             Ok(Err(e)) => {
                 if let Some(child) = child.as_mut() {
-                    let _ = child.kill().await;
+                    let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
                 }
-                cleanup_endpoint(&endpoint);
                 return Err(e).context("accept от ядра");
             }
             Err(_) => {
                 if let Some(child) = child.as_mut() {
-                    let _ = child.kill().await;
+                    let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
                 }
-                cleanup_endpoint(&endpoint);
                 bail!(
                     "ядро не подключилось к {} за 15 с — проверьте, что бинарь GUI называется \
                      `throne-gtk` и лежит рядом с ядром",
-                    endpoint.display()
+                    endpoint.0.display()
                 );
             }
         };
 
-        let client = CoreClient::attach(stream);
+        let (client, transport_tasks) = CoreClient::attach(stream);
+        // Move handles without letting the temporary task owner abort them.
+        let mut transport_tasks = transport_tasks;
+        tasks.0.append(&mut transport_tasks.0);
         Ok(Self {
             child,
-            endpoint,
+            endpoint: Some(endpoint),
+            tasks,
+            closed: false,
+            close_error: None,
             client,
         })
     }
 
-    pub async fn shutdown(mut self) {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.client.stop()).await;
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.kill().await;
+    /// Attempts a bounded graceful Stop, then closes all transport clones and
+    /// reaps a directly owned child. An error means VPN restoration is unconfirmed.
+    pub async fn close(&mut self, grace: Duration) -> Result<()> {
+        if self.closed {
+            return match &self.close_error {
+                Some(e) => Err(anyhow!(e.clone())),
+                None => Ok(()),
+            };
         }
-        cleanup_endpoint(&self.endpoint);
+        let stop = tokio::time::timeout(grace, self.client.stop())
+            .await
+            .map_err(|_| anyhow!("таймаут Stop; восстановление VPN не подтверждено"))
+            .and_then(|r| r)
+            .context("Stop: восстановление VPN не подтверждено");
+        self.client.state.fail();
+        for task in &self.tasks.0 {
+            task.abort();
+        }
+        for task in &mut self.tasks.0 {
+            let _ = task.await;
+        }
+        self.tasks.0.clear();
+        let reap = if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) => match child.start_kill() {
+                    Ok(()) => tokio::time::timeout(Duration::from_secs(5), child.wait())
+                        .await
+                        .context("таймаут завершения ядра")
+                        .and_then(|r| r.map(|_| ()).map_err(Into::into)),
+                    Err(e) => Err(e.into()),
+                },
+                Err(e) => Err(e.into()),
+            }
+        } else {
+            Ok(())
+        };
+        self.endpoint.take();
+        self.closed = true;
+        let result = stop.and(reap);
+        self.close_error = result.as_ref().err().map(|e| format!("{e:#}"));
+        result
+    }
+
+    pub async fn shutdown(mut self) {
+        let _ = self.close(Duration::from_secs(5)).await;
     }
 
     /// Whether the core process has exited on its own.
@@ -195,38 +332,33 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
-        cleanup_endpoint(&self.endpoint);
+        self.client.state.fail();
+        for task in &self.tasks.0 {
+            task.abort();
+        }
     }
 }
 
-#[cfg(unix)]
-fn cleanup_endpoint(endpoint: &Path) {
-    let _ = std::fs::remove_file(endpoint);
-}
-
-#[cfg(windows)]
-fn cleanup_endpoint(_endpoint: &Path) {
-    // A named pipe disappears when its final handle is closed.
-}
-
-fn pipe_core_logs(child: &mut Child) {
+fn pipe_core_logs(child: &mut Child) -> Vec<tokio::task::JoinHandle<()>> {
+    let mut tasks = Vec::new();
     use tokio::io::{AsyncBufReadExt, BufReader};
     if let Some(out) = child.stdout.take() {
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             let mut lines = BufReader::new(out).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!(target: "core", "{line}");
             }
-        });
+        }));
     }
     if let Some(err) = child.stderr.take() {
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             let mut lines = BufReader::new(err).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!(target: "core", "{line}");
             }
-        });
+        }));
     }
+    tasks
 }
 
 /// Request to start the configuration.
@@ -266,73 +398,130 @@ pub fn speed_test_request(config: String) -> pb::SpeedTestRequest {
 }
 
 impl CoreClient {
-    fn attach(stream: IpcStream) -> Self {
+    fn attach(stream: IpcStream) -> (Self, Tasks) {
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::channel::<Call>(64);
-        let pending: Pending = Arc::default();
-        let next_id = Arc::new(AtomicU32::new(1));
-
-        // Writer: frames requests and remembers where to send each response.
-        {
-            let pending = pending.clone();
-            tokio::spawn(async move {
+        let (cancel, _) = watch::channel(false);
+        let state = Arc::new(Transport {
+            pending: Arc::default(),
+            cancel,
+            slots: Semaphore::new(64),
+            next_id: AtomicU32::new(1),
+        });
+        let mut tasks = Tasks(Vec::new());
+        let s = state.clone();
+        let mut cancelled = s.cancel.subscribe();
+        tasks.0.push(tokio::spawn(async move {
+            let run = async {
                 while let Some(call) = rx.recv().await {
-                    let id = next_id.fetch_add(1, Ordering::Relaxed);
-                    pending.lock().await.insert(id, call.reply);
-
+                    if !s.pending.lock().unwrap().contains_key(&call.id) {
+                        continue;
+                    }
                     let m = call.method.as_bytes();
-                    let mut frame = Vec::with_capacity(4 + 2 + m.len() + 4 + call.payload.len());
-                    frame.extend_from_slice(&id.to_le_bytes());
+                    let mut frame = Vec::with_capacity(10 + m.len() + call.payload.len());
+                    frame.extend_from_slice(&call.id.to_le_bytes());
                     frame.extend_from_slice(&(m.len() as u16).to_le_bytes());
                     frame.extend_from_slice(m);
                     frame.extend_from_slice(&(call.payload.len() as u32).to_le_bytes());
                     frame.extend_from_slice(&call.payload);
-
-                    if writer.write_all(&frame).await.is_err() {
-                        if let Some(reply) = pending.lock().await.remove(&id) {
-                            let _ = reply.send(Err(anyhow!("соединение с ядром разорвано")));
-                        }
+                    if !matches!(
+                        tokio::time::timeout(Duration::from_secs(5), writer.write_all(&frame))
+                            .await,
+                        Ok(Ok(()))
+                    ) {
                         break;
                     }
                 }
-            });
-        }
-
-        // Reader: parses responses and wakes the waiters by req_id.
-        {
-            let pending = pending.clone();
-            tokio::spawn(async move {
+            };
+            if !*cancelled.borrow() {
+                tokio::select! { _ = run => {}, _ = cancelled.changed() => {} }
+            }
+            s.fail();
+        }));
+        let s = state.clone();
+        let mut cancelled = s.cancel.subscribe();
+        tasks.0.push(tokio::spawn(async move {
+            let run = async {
                 loop {
                     let mut head = [0u8; 9];
                     if reader.read_exact(&mut head).await.is_err() {
                         break;
                     }
-                    let id = u32::from_le_bytes(head[0..4].try_into().unwrap());
-                    let status = head[4];
-                    let len = u32::from_le_bytes(head[5..9].try_into().unwrap());
+                    let id = u32::from_le_bytes(head[..4].try_into().unwrap());
+                    let len = u32::from_le_bytes(head[5..].try_into().unwrap());
                     if len > MAX_FRAME {
                         break;
                     }
-                    let mut data = vec![0u8; len as usize];
-                    if len > 0 && reader.read_exact(&mut data).await.is_err() {
+                    let mut data = vec![0; len as usize];
+                    if reader.read_exact(&mut data).await.is_err() {
                         break;
                     }
-                    if let Some(reply) = pending.lock().await.remove(&id) {
-                        let _ = reply.send(if status == 0 {
+                    if let Some(reply) = s.pending.lock().unwrap().remove(&id) {
+                        let _ = reply.send(if head[4] == 0 {
                             Ok(data)
                         } else {
                             Err(anyhow!(String::from_utf8_lossy(&data).into_owned()))
                         });
                     }
                 }
-                // The connection closed — none of the response waiters will receive one.
-                for (_, reply) in pending.lock().await.drain() {
-                    let _ = reply.send(Err(anyhow!("ядро закрыло соединение")));
-                }
-            });
-        }
+            };
+            if !*cancelled.borrow() {
+                tokio::select! { _ = run => {}, _ = cancelled.changed() => {} }
+            }
+            s.fail();
+        }));
+        (Self { tx, state }, tasks)
+    }
 
-        Self { tx }
+    async fn call_with_timeout<Req: Message, Resp: Message + Default>(
+        &self,
+        method: &'static str,
+        req: Req,
+        budget: Duration,
+    ) -> Result<Resp> {
+        tokio::time::timeout(budget, async {
+            let _slot = self
+                .state
+                .slots
+                .acquire()
+                .await
+                .context("ядро не запущено")?;
+            let (reply, wait) = oneshot::channel();
+            let id = {
+                let mut pending = self.state.pending.lock().unwrap();
+                if *self.state.cancel.borrow() {
+                    bail!("ядро не запущено");
+                }
+                let id = loop {
+                    let id = self.state.next_id.fetch_add(1, Ordering::Relaxed);
+                    if !pending.contains_key(&id) {
+                        break id;
+                    }
+                };
+                pending.insert(id, reply);
+                id
+            };
+            let _guard = PendingGuard {
+                pending: self.state.pending.clone(),
+                id,
+            };
+            let payload = req.encode_to_vec();
+            if payload.len() > MAX_FRAME as usize {
+                bail!("слишком большой IPC запрос");
+            }
+            self.tx
+                .send(Call {
+                    id,
+                    method,
+                    payload,
+                })
+                .await
+                .context("ядро не запущено")?;
+            let data = wait.await.context("ответ ядра потерян")??;
+            Resp::decode(data.as_slice()).with_context(|| format!("разбор ответа {method}"))
+        })
+        .await
+        .with_context(|| format!("таймаут {method}"))?
     }
 
     async fn call<Req: Message, Resp: Message + Default>(
@@ -340,17 +529,13 @@ impl CoreClient {
         method: &'static str,
         req: Req,
     ) -> Result<Resp> {
-        let (reply, wait) = oneshot::channel();
-        self.tx
-            .send(Call {
-                method,
-                payload: req.encode_to_vec(),
-                reply,
-            })
+        let seconds = match method {
+            "Start" | "CheckConfig" => 120,
+            "IPTest" => 120,
+            _ => 5,
+        };
+        self.call_with_timeout(method, req, Duration::from_secs(seconds))
             .await
-            .map_err(|_| anyhow!("ядро не запущено"))?;
-        let data = wait.await.map_err(|_| anyhow!("ответ ядра потерян"))??;
-        Resp::decode(data.as_slice()).with_context(|| format!("разбор ответа {method}"))
     }
 
     /// Some methods respond with `ErrorResp`, where the error is a regular field
@@ -377,7 +562,8 @@ impl CoreClient {
     }
 
     pub async fn test(&self, req: pb::TestReq) -> Result<pb::TestResp> {
-        self.call("Test", req).await
+        let budget = latency_budget(&req);
+        self.call_with_timeout("Test", req, budget).await
     }
 
     pub async fn stop_test(&self) -> Result<()> {
@@ -398,7 +584,8 @@ impl CoreClient {
     }
 
     pub async fn speed_test(&self, req: pb::SpeedTestRequest) -> Result<pb::SpeedTestResponse> {
-        self.call("SpeedTest", req).await
+        let budget = speed_budget(&req);
+        self.call_with_timeout("SpeedTest", req, budget).await
     }
 
     pub async fn query_speed_test(&self) -> Result<pb::QuerySpeedTestResponse> {
@@ -452,5 +639,207 @@ impl CoreClient {
             "" => Ok((r.private_key().to_string(), r.public_key().to_string())),
             e => Err(anyhow!(e.to_string())),
         }
+    }
+}
+
+fn latency_budget(req: &pb::TestReq) -> Duration {
+    let c = req.max_concurrency();
+    let c = if c <= 0 || c >= 500 { 100 } else { c as u64 };
+    let n = req.outbound_tags.len().max(1) as u64;
+    let probe = if req.test_timeout_ms() <= 0 {
+        3000
+    } else {
+        req.test_timeout_ms() as u64
+    };
+    Duration::from_millis(30_000 + n.div_ceil(c).saturating_mul(2 * probe))
+}
+
+fn speed_budget(req: &pb::SpeedTestRequest) -> Duration {
+    let n = req.outbound_tags.len().max(1) as u64;
+    let phases = u64::from(req.test_download()) + u64::from(req.test_upload());
+    let ms = req.timeout_ms().max(10_000) as u64;
+    Duration::from_millis(30_000 + n.saturating_mul(8_000 + phases * ms))
+}
+
+#[cfg(all(test, unix))]
+mod safety_tests {
+    use super::*;
+
+    async fn request(peer: &mut UnixStream) -> u32 {
+        let id = peer.read_u32_le().await.unwrap();
+        let len = peer.read_u16_le().await.unwrap();
+        let mut method = vec![0; len as usize];
+        peer.read_exact(&mut method).await.unwrap();
+        let len = peer.read_u32_le().await.unwrap();
+        let mut payload = vec![0; len as usize];
+        peer.read_exact(&mut payload).await.unwrap();
+        id
+    }
+
+    async fn finish(client: &CoreClient, mut tasks: Tasks) {
+        client.state.fail();
+        for task in &mut tasks.0 {
+            tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        tasks.0.clear();
+    }
+
+    #[tokio::test]
+    async fn pending_removed_on_timeout_drop_and_late_reply() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach(stream);
+        let c = client.clone();
+        let call = tokio::spawn(async move {
+            c.call_with_timeout::<_, pb::EmptyResp>(
+                "Test",
+                pb::EmptyReq {},
+                Duration::from_millis(50),
+            )
+            .await
+        });
+        let id = request(&mut peer).await;
+        assert!(call.await.unwrap().is_err());
+        assert_eq!(client.state.pending.lock().unwrap().len(), 0);
+        peer.write_all(&[id.to_le_bytes().as_slice(), &[0], &0u32.to_le_bytes()].concat())
+            .await
+            .unwrap();
+        let c = client.clone();
+        let call = tokio::spawn(async move { c.query_stats().await });
+        request(&mut peer).await;
+        call.abort();
+        let _ = call.await;
+        assert_eq!(client.state.pending.lock().unwrap().len(), 0);
+        // A late response must not poison the next request.
+        let c = client.clone();
+        let call = tokio::spawn(async move { c.query_stats().await });
+        let id = request(&mut peer).await;
+        peer.write_all(&[id.to_le_bytes().as_slice(), &[0], &0u32.to_le_bytes()].concat())
+            .await
+            .unwrap();
+        call.await.unwrap().unwrap();
+        finish(&client, tasks).await;
+    }
+
+    #[tokio::test]
+    async fn close_invalidates_clones_and_preserves_failure() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach(stream);
+        let clone = client.clone();
+        let mut core = Core {
+            child: None,
+            endpoint: None,
+            tasks,
+            closed: false,
+            close_error: None,
+            client,
+        };
+        assert!(core.close(Duration::from_millis(20)).await.is_err());
+        assert!(core.tasks.0.is_empty());
+        assert!(clone.query_stats().await.is_err());
+        assert_eq!(clone.state.pending.lock().unwrap().len(), 0);
+        assert!(core.close(Duration::from_secs(1)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn writer_failure_wakes_all_and_joins() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (client, tasks) = CoreClient::attach(stream);
+        let c = client.clone();
+        let first = tokio::spawn(async move {
+            c.call_with_timeout::<_, pb::EmptyResp>(
+                "Test",
+                pb::EmptyReq {},
+                Duration::from_secs(30),
+            )
+            .await
+        });
+        request(&mut peer).await;
+        // Stop reading but retain the peer write half: failure must originate
+        // in the writer rather than relying on EOF from the response reader.
+        let (peer_read, _peer_write) = peer.into_split();
+        drop(peer_read);
+        let c = client.clone();
+        let second = tokio::spawn(async move {
+            c.call_with_timeout::<_, pb::EmptyResp>(
+                "Test",
+                pb::LoadConfigReq {
+                    core_config: Some("x".repeat(8 * 1024 * 1024)),
+                    ..Default::default()
+                },
+                Duration::from_secs(10),
+            )
+            .await
+        });
+        assert!(tokio::time::timeout(Duration::from_secs(8), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(second.await.unwrap().is_err());
+        assert_eq!(client.state.pending.lock().unwrap().len(), 0);
+        finish(&client, tasks).await;
+    }
+
+    #[test]
+    fn endpoint_guards_are_independent_and_preserve_replacements() {
+        // Short path is required by Darwin sockaddr_un.
+        let dir = PathBuf::from("/tmp");
+        let a = endpoint_name(&dir);
+        let b = endpoint_name(&dir);
+        let _a_listener = std::os::unix::net::UnixListener::bind(&a).unwrap();
+        let ga = EndpointGuard::new(a.clone());
+        let _b_listener = std::os::unix::net::UnixListener::bind(&b).unwrap();
+        let gb = EndpointGuard::new(b.clone());
+        drop(ga);
+        assert!(!a.exists());
+        assert!(b.exists());
+        std::fs::remove_file(&b).unwrap();
+        let _replacement = std::os::unix::net::UnixListener::bind(&b).unwrap();
+        drop(gb);
+        assert!(b.exists());
+        std::fs::remove_file(b).unwrap();
+    }
+
+    #[test]
+    fn concurrent_endpoint_names_unique() {
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (0..100)
+                        .map(|_| endpoint_name(Path::new("/tmp")))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let names: std::collections::HashSet<_> = threads
+            .into_iter()
+            .flat_map(|t| t.join().unwrap())
+            .collect();
+        assert_eq!(names.len(), 800);
+    }
+
+    #[test]
+    fn long_latency_deadline_arithmetic() {
+        let mut req = pb::TestReq {
+            outbound_tags: vec![String::new(); 501],
+            ..Default::default()
+        };
+        assert_eq!(latency_budget(&req), Duration::from_secs(66));
+        req.max_concurrency = Some(500);
+        assert_eq!(latency_budget(&req), Duration::from_secs(66));
+        req.max_concurrency = Some(2);
+        req.test_timeout_ms = Some(10_000);
+        assert_eq!(latency_budget(&req), Duration::from_secs(5050));
+        let speed = pb::SpeedTestRequest {
+            outbound_tags: vec![String::new(); 10],
+            test_download: Some(true),
+            test_upload: Some(true),
+            timeout_ms: Some(60_000),
+            ..Default::default()
+        };
+        assert_eq!(speed_budget(&speed), Duration::from_secs(1310));
     }
 }

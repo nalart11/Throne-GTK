@@ -522,8 +522,25 @@ impl Store {
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(1);
 
-        let mut stmt = src.prepare(
-            "SELECT COALESCE(name,''), domain_json, domain_suffix_json, domain_keyword_json,
+        // These two conditions were added after the original routing schema.
+        // Only substitute known optional columns; missing required columns must
+        // remain an error rather than importing an incomplete rule.
+        let columns = src
+            .prepare("PRAGMA table_info(route_rules)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let suffix = if columns.iter().any(|c| c == "domain_suffix_json") {
+            "domain_suffix_json"
+        } else {
+            "NULL"
+        };
+        let keyword = if columns.iter().any(|c| c == "domain_keyword_json") {
+            "domain_keyword_json"
+        } else {
+            "NULL"
+        };
+        let query = format!(
+            "SELECT COALESCE(name,''), domain_json, {suffix}, {keyword},
                     domain_regex_json, ip_cidr_json, port_json, port_range_json,
                     process_name_json, rule_set_json,
                     ip_version, network, protocol, inbound_json, source_ip_cidr_json,
@@ -531,7 +548,10 @@ impl Store {
                     process_path_regex_json, wifi_ssid_json, wifi_bssid_json,
                     source_ip_is_private, ip_is_private, invert, outbound_id, action
              FROM route_rules WHERE route_profile_id = ?1 ORDER BY rule_order",
-        )?;
+        );
+        let mut stmt = src
+            .prepare(&query)
+            .context("preparing Throne route_rules import (required routing columns must exist)")?;
         let rows = stmt
             .query_map([active], |r| {
                 Ok(ThroneRule {
@@ -872,6 +892,7 @@ mod tests {
         let mut s = Settings::default();
         s.mixed_port = 1080;
         s.mode = throne_config::settings::ProxyMode::Vpn;
+        s.language = throne_config::settings::Language::En;
         s.dns_remote = "https://dns.google/dns-query".into();
         store.save_settings(&s).unwrap();
 
@@ -1017,6 +1038,89 @@ mod tests {
         assert_eq!(rules[0].action, RouteAction::Direct);
         assert_eq!(rules[1].name, "Реклама");
         assert_eq!(rules[1].action, RouteAction::Block);
+    }
+
+    #[test]
+    fn import_routes_from_legacy_and_current_schemas() {
+        for current in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("throne.db");
+            let src = Connection::open(&path).unwrap();
+            src.execute_batch(
+                r#"
+                CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+                INSERT INTO settings VALUES ('current_route_id', '2');
+                CREATE TABLE route_rules (
+                    route_profile_id INTEGER, rule_order INTEGER, name TEXT,
+                    domain_json TEXT, domain_regex_json TEXT, ip_cidr_json TEXT,
+                    port_json TEXT, port_range_json TEXT, process_name_json TEXT,
+                    rule_set_json TEXT, ip_version TEXT, network TEXT, protocol TEXT,
+                    inbound_json TEXT, source_ip_cidr_json TEXT, source_port_json TEXT,
+                    source_port_range_json TEXT, process_path_json TEXT,
+                    process_path_regex_json TEXT, wifi_ssid_json TEXT, wifi_bssid_json TEXT,
+                    source_ip_is_private INTEGER DEFAULT 0, ip_is_private INTEGER DEFAULT 0,
+                    invert INTEGER DEFAULT 0, outbound_id INTEGER DEFAULT -1,
+                    action TEXT DEFAULT 'route');
+                INSERT INTO route_rules
+                    (route_profile_id, rule_order, name, domain_json, domain_regex_json)
+                    VALUES (2, 1, 'Supported', '["example.org"]', '["^test"]');
+                INSERT INTO route_rules
+                    (route_profile_id, rule_order, name, domain_json, network)
+                    VALUES (2, 2, 'Unsupported', '["skip.org"]', 'udp');
+                INSERT INTO route_rules
+                    (route_profile_id, rule_order, name, domain_json)
+                    VALUES (1, 0, 'Inactive', '["inactive.org"]');
+                "#,
+            )
+            .unwrap();
+            if current {
+                src.execute_batch(
+                    r#"
+                    ALTER TABLE route_rules ADD COLUMN domain_suffix_json TEXT;
+                    ALTER TABLE route_rules ADD COLUMN domain_keyword_json TEXT;
+                    UPDATE route_rules SET domain_suffix_json = '["suffix.org"]',
+                        domain_keyword_json = '["keyword"]' WHERE name = 'Supported';
+                    "#,
+                )
+                .unwrap();
+            }
+            drop(src);
+
+            let mut store = Store::open_memory().unwrap();
+            assert_eq!(store.import_throne_routes(&path).unwrap(), (1, 1));
+            let rules = store.settings().unwrap().route_rules;
+            assert_eq!(rules.len(), 1);
+            assert_eq!(rules[0].name, "Supported");
+            assert_eq!(rules[0].action, RouteAction::Proxy);
+            assert_eq!(rules[0].match_mode, MatchMode::Any);
+            let conditions: Vec<_> = rules[0]
+                .conditions
+                .iter()
+                .map(|c| (c.kind, c.values.clone()))
+                .collect();
+            let mut expected = vec![(MatchKind::Domain, vec!["example.org".to_string()])];
+            if current {
+                expected.push((MatchKind::DomainSuffix, vec!["suffix.org".to_string()]));
+                expected.push((MatchKind::DomainKeyword, vec!["keyword".to_string()]));
+            }
+            expected.push((MatchKind::DomainRegex, vec!["^test".to_string()]));
+            assert_eq!(conditions, expected);
+        }
+    }
+
+    #[test]
+    fn import_routes_reports_missing_required_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("throne.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("CREATE TABLE route_rules (route_profile_id INTEGER);")
+            .unwrap();
+        let mut store = Store::open_memory().unwrap();
+        let error = store.import_throne_routes(&path).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("preparing Throne route_rules import"));
+        assert!(message.contains("no such column"));
     }
 
     #[test]

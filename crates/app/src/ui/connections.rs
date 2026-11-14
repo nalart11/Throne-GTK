@@ -10,6 +10,7 @@ use adw::prelude::*;
 
 use crate::engine::Connection;
 use crate::format;
+use crate::i18n::tr;
 
 /// Users do not read more rows anyway, and redrawing once per second becomes noticeable.
 const MAX_ROWS: usize = 120;
@@ -32,7 +33,7 @@ impl ConnectionsPage {
             .margin_start(12)
             .margin_end(12)
             .css_classes(["section-label"])
-            .label("НЕТ СОЕДИНЕНИЙ")
+            .label(tr("НЕТ СОЕДИНЕНИЙ", "NO CONNECTIONS"))
             .build();
 
         let list = gtk::ListBox::builder()
@@ -48,8 +49,11 @@ impl ConnectionsPage {
 
         let empty = adw::StatusPage::builder()
             .icon_name("network-transmit-receive-symbolic")
-            .title("Соединений нет")
-            .description("Здесь появятся запросы приложений, как только пойдёт трафик.")
+            .title(tr("Соединений нет", "No connections"))
+            .description(tr(
+                "Здесь появятся запросы приложений, как только пойдёт трафик.",
+                "App requests will appear here when traffic starts.",
+            ))
             .vexpand(true)
             .build();
 
@@ -90,9 +94,12 @@ impl ConnectionsPage {
         }
 
         self.summary.set_label(&match total {
-            0 => "НЕТ СОЕДИНЕНИЙ".to_string(),
-            n if n > MAX_ROWS => format!("АКТИВНО {n} · ПОКАЗАНО {MAX_ROWS}"),
-            n => format!("АКТИВНО {n}"),
+            0 => tr("НЕТ СОЕДИНЕНИЙ", "NO CONNECTIONS").to_string(),
+            n if n > MAX_ROWS => crate::tr_format!(
+                "АКТИВНО {n} · ПОКАЗАНО {MAX_ROWS}",
+                "ACTIVE {n} · SHOWING {MAX_ROWS}"
+            ),
+            n => crate::tr_format!("АКТИВНО {n}", "ACTIVE {n}"),
         });
         self.scroller.set_visible(total > 0);
         self.empty.set_visible(total == 0);

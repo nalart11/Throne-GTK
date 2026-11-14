@@ -7,6 +7,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::route::RouteRule;
 
+/// Interface language, applied at application startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    Ru,
+    En,
+}
+
 /// How system traffic is intercepted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -143,6 +152,7 @@ pub struct Settings {
     pub cache_file: String,
 
     // ── interface ─────────────────────────────────────────────────────────
+    pub language: Language,
     /// Closing the window hides the application in the tray instead of quitting it.
     /// Without a system tray icon, this setting has no effect: there is nowhere
     /// to hide the window.
@@ -204,9 +214,28 @@ impl Default for Settings {
             cache_file: String::new(),
 
             close_to_tray: true,
+            language: Language::Ru,
             start_minimized: false,
             connect_last_on_start: false,
             last_profile_id: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+
+    #[test]
+    fn language_defaults_and_serialization() {
+        assert_eq!(Settings::default().language, Language::Ru);
+        assert_eq!(
+            serde_json::from_str::<Settings>("{}").unwrap().language,
+            Language::Ru
+        );
+        for (language, json) in [(Language::Ru, "\"ru\""), (Language::En, "\"en\"")] {
+            assert_eq!(serde_json::to_string(&language).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Language>(json).unwrap(), language);
         }
     }
 }
